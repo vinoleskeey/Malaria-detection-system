@@ -380,10 +380,21 @@ def predict():
             file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(file_path)
 
-            # Get the absolute path - the malaria_model directory is two levels up from the app
+            # Get the absolute path - the malaria_model directory
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            # Go up two levels to find malaria_model (from Malaria detection system to Documents to Victor SHITTU)
-            model_dir = os.path.join(base_dir, "..", "..", "malaria_model")
+            
+            # For local development, try the relative path first
+            # For Render deployment, check if malaria_model is in the app directory
+            local_model_dir = os.path.join(base_dir, "malaria_model")
+            parent_model_dir = os.path.join(base_dir, "..", "..", "malaria_model")
+            
+            if os.path.exists(local_model_dir):
+                model_dir = local_model_dir
+            elif os.path.exists(parent_model_dir):
+                model_dir = parent_model_dir
+            else:
+                return "Error: malaria_model directory not found. Please ensure the model is included in your deployment."
+            
             predict_script = os.path.join(model_dir, "malaria_predict.py")
             model_path = os.path.join(model_dir, "malaria_cnn_model.keras")
             

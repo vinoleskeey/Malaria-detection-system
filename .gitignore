@@ -14,9 +14,15 @@ env/
 .env
 *.sqlite3
 database.db
-uploads/
 .pytest/
 .coverage
 htmlcov/
 *.log
 .DS_Store
+
+# Exclude specific files in malaria_model but keep the directory
+malaria_model/.venv/
+malaria_model/__pycache__/
+malaria_model/*.ipynb
+malaria_model/.ipynb_checkpoints/
+malaria_model/cell-images-for-detecting-malaria.zip
