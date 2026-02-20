@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="login-container">
+    <div class="login-card">
+        <h2><i class="fas fa-virus" style="color: #00796b;"></i> Login</h2>
+
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <div class="alert alert-error">
+                <i class="fas fa-exclamation-circle"></i>
+                {% for message in messages %}
+                    {{ message }}
+                {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form method="post" id="loginForm">
+            <input name="email" placeholder="Email Address" required value="{{ request.form.get('email', '') }}" style="background: #f8f9fa;">
+            <div class="password-field">
+                <input name="password" type="password" id="password" placeholder="Password" required style="background: #f8f9fa;">
+                <span class="toggle-password" onclick="togglePassword('password', 'toggleIcon')">
+                    <svg id="toggleIcon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                </span>
+            </div>
+            <button type="submit"><i class="fas fa-sign-in-alt"></i> Login</button>
+        </form>
+
+        <p>
+            <a href="/forgot_password"><i class="fas fa-key"></i> Forgot Password?</a>
+        </p>
+
+        <p>
+            Don't have an account? <a href="/register"><i class="fas fa-user-plus"></i> Register</a>
+        </p>
+    </div>
+</div>
+
+<script>
+function togglePassword(inputId, iconId) {
+    const input = document.getElementById(inputId);
+    const icon = document.getElementById(iconId);
+    if (input.type === "password") {
+        input.type = "text";
+        icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+    } else {
+        input.type = "password";
+        icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
+    }
+}
+</script>
+
+<style>
+.password-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.password-field input {
+    flex: 1;
+    padding-right: 40px;
+    background: #f8f9fa !important;
+}
+.toggle-password {
+    position: absolute;
+    right: 12px;
+    cursor: pointer;
+    color: #00796b;
+    z-index: 10;
+}
+.toggle-password:hover {
+    color: #004d40;
+}
+</style>
+
+{% endblock %}

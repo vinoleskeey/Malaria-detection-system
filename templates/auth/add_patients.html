@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block header %}Add New Patient{% endblock %}
+{% block content %}
+
+<div class="form-container">
+    <h2 style="text-align: center; color: #00796b; margin-bottom: 30px;">
+        <i class="fas fa-user-plus"></i> Add New Patient
+    </h2>
+
+    <form action="/patients/add" method="post">
+        <div class="form-group">
+            <label><i class="fas fa-user"></i> Full Name</label>
+            <input name="name" placeholder="Enter patient full name" required style="background: #f8f9fa;">
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-birthday-cake"></i> Age</label>
+            <input name="age" type="number" placeholder="Enter patient age" required style="background: #f8f9fa;">
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-venus-mars"></i> Gender</label>
+            <select name="gender" required style="background: #f8f9fa;">
+                <option value="">Select Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+            </select>
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 15px; font-size: 16px;">
+            <i class="fas fa-plus-circle"></i> Add Patient
+        </button>
+    </form>
+</div>
+
+{% endblock %}

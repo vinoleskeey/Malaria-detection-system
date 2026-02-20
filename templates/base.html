@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Malaria Detection System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #e8f4f8 0%, #d4e9f7 100%);
+            min-height: 100vh;
+        }
+        
+        /* Background Slideshow */
+        .bg-slideshow {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -2;
+            overflow: hidden;
+        }
+        
+        .bg-slideshow .slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            transition: opacity 1.5s ease-in-out;
+        }
+        
+        .bg-slideshow .slide.active {
+            opacity: 1;
+        }
+        
+        .bg-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, rgba(0,121,107,0.85) 0%, rgba(0,77,64,0.9) 100%);
+            z-index: -1;
+        }
+        
+        /* Vertical Sidebar Navigation - Hospital Theme */
+        .sidebar {
+            width: 280px;
+            background: linear-gradient(160deg, #00796b 0%, #004d40 50%, #00695c 100%);
+            min-height: 100vh;
+            position: fixed;
+            left: 0;
+            top: 0;
+            padding: 20px 0;
+            box-shadow: 4px 0 25px rgba(0,0,0,0.25);
+            z-index: 1000;
+        }
+        
+        .sidebar::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #00bfa5, #64ffda, #00bfa5);
+        }
+        
+        .sidebar-brand {
+            text-align: center;
+            padding: 25px 20px;
+            margin-bottom: 15px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+        }
+        
+        .sidebar-brand h2 {
+            color: #fff;
+            font-size: 20px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .sidebar-brand .virus-icon {
+            color: #64ffda;
+            font-size: 28px;
+            animation: pulse 2s infinite;
+        }
+        
+        .sidebar-brand .hospital-icon {
+            color: #ff8a80;
+            font-size: 24px;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.15); }
+        }
+        
+        .nav-menu {
+            list-style: none;
+        }
+        
+        .nav-item {
+            position: relative;
+        }
+        
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 14px 25px;
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-size: 14px;
+            gap: 14px;
+            border-left: 4px solid transparent;
+            margin: 2px 8px;
+            border-radius: 10px;
+        }
+        
+        .nav-link:hover {
+            background: linear-gradient(90deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
+            color: #fff;
+            border-left-color: #64ffda;
+            transform: translateX(5px);
+        }
+        
+        .nav-link i {
+            width: 20px;
+            text-align: center;
+            font-size: 17px;
+            color: #b2dfdb;
+        }
+        
+        .nav-link:hover i {
+            color: #64ffda;
+        }
+        
+        .nav-link .arrow {
+            margin-left: auto;
+            transition: transform 0.3s ease;
+            font-size: 11px;
+            color: #b2dfdb;
+        }
+        
+        .nav-item:hover .nav-link .arrow {
+            transform: rotate(90deg);
+            color: #64ffda;
+        }
+        
+        /* Active nav item */
+        .nav-item.active .nav-link {
+            background: linear-gradient(90deg, rgba(100,255,218,0.2) 0%, rgba(100,255,218,0.05) 100%);
+            border-left-color: #64ffda;
+        }
+        
+        .nav-item.active .nav-link i {
+            color: #64ffda;
+        }
+        
+        /* Dropdown Menu */
+        .dropdown-menu {
+            display: none;
+            background: rgba(0,0,0,0.25);
+            list-style: none;
+            padding: 8px 0;
+            margin: 5px 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .dropdown-menu li a {
+            display: flex;
+            align-items: center;
+            padding: 11px 20px 11px 55px;
+            color: rgba(255,255,255,0.75);
+            text-decoration: none;
+            transition: all 0.3s ease;
+            font-size: 13px;
+            gap: 12px;
+            border-radius: 8px;
+            margin: 2px 8px;
+        }
+        
+        .dropdown-menu li a:hover {
+            background: rgba(255,255,255,0.1);
+            color: #64ffda;
+            transform: translateX(5px);
+        }
+        
+        .dropdown-menu li a i {
+            font-size: 13px;
+            width: 16px;
+            color: #b2dfdb;
+        }
+        
+        .dropdown-menu li a:hover i {
+            color: #64ffda;
+        }
+        
+        .dropdown:hover .dropdown-menu {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* Dropdown divider */
+        .dropdown-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.1);
+            margin: 8px 20px;
+        }
+        
+        .dropdown-header {
+            padding: 8px 25px;
+            color: rgba(255,255,255,0.45);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+        
+        /* Main Content */
+        .main-content {
+            margin-left: 280px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        
+        /* Header */
+        .top-header {
+            background: linear-gradient(135deg, #00796b 0%, #004d40 100%);
+            padding: 22px 35px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 25px rgba(0,121,107,0.3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .top-header h1 {
+            color: #fff;
+            font-size: 26px;
+            font-weight: 600;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .user-info span {
+            color: rgba(255,255,255,0.9);
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            background: linear-gradient(135deg, #64ffda 0%, #00bfa5 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #004d40;
+            font-weight: 700;
+            font-size: 18px;
+            box-shadow: 0 2px 10px rgba(100,255,218,0.3);
+        }
+        
+        /* Cards */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+        
+        .card {
+            background: #fff;
+            padding: 28px;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #00796b, #00bfa5);
+        }
+        
+        .card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+        }
+        
+        .card h3 {
+            color: #546e7a;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        
+        .card p {
+            color: #00796b;
+            font-size: 36px;
+            font-weight: 700;
+        }
+        
+        .card-icon {
+            width: 55px;
+            height: 55px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 18px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        
+        .card-icon.patients { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .card-icon.predictions { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; }
+        .card-icon.high-risk { background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); color: white; }
+        .card-icon.low-risk { background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%); color: white; }
+        .card-icon.staff { background: linear-gradient(135deg, #00bfa5 0%, #64ffda 100%); color: #004d40; }
+        
+        /* Buttons */
+        .btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #00796b 0%, #004d40 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,121,107,0.4);
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            background: #fff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        
+        th {
+            background: linear-gradient(135deg, #00796b 0%, #004d40 100%);
+            color: white;
+            padding: 16px;
+            text-align: left;
+            font-weight: 500;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        td {
+            padding: 16px;
+            border-bottom: 1px solid #f0f0f0;
+            color: #37474f;
+        }
+        
+        tr:hover {
+            background: #f8f9fa;
+        }
+        
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 25px;
+            color: rgba(255,255,255,0.7);
+            font-size: 14px;
+            margin-top: 40px;
+        }
+        
+        /* Forms */
+        .form-container {
+            background: #fff;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 4px 25px rgba(0,0,0,0.08);
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        .form-group {
+            margin-bottom: 22px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #37474f;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 15px;
+            transition: all 0.3s ease;
+            font-family: 'Poppins', sans-serif;
+        }
+        
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: #00796b;
+            box-shadow: 0 0 0 3px rgba(0,121,107,0.1);
+        }
+        
+        /* Alert messages */
+        .alert {
+            padding: 16px 22px;
+            border-radius: 12px;
+            margin-bottom: 22px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .alert-success {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+        
+        .alert-error {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+        
+        /* Department filter badges */
+        .dept-filter {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 25px;
+        }
+        
+        .dept-filter a {
+            padding: 10px 18px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            background: #fff;
+            color: #00796b;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .dept-filter a:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        }
+        
+        .dept-filter a.active {
+            background: linear-gradient(135deg, #00796b 0%, #004d40 100%);
+            color: white;
+            box-shadow: 0 4px 15px rgba(0,121,107,0.3);
+        }
+        
+        /* Status badges */
+        .badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .badge-success { background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); color: #155724; }
+        .badge-danger { background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); color: #721c24; }
+        .badge-warning { background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%); color: #856404; }
+        .badge-info { background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%); color: #0c5460; }
+        
+        /* Login page styling */
+        .login-container {
+            max-width: 420px;
+            margin: 60px auto;
+        }
+        
+        .login-card {
+            background: #fff;
+            padding: 45px;
+            border-radius: 20px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.12);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .login-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(90deg, #00796b, #00bfa5, #64ffda, #00bfa5, #00796b);
+        }
+        
+        .login-card h2 {
+            text-align: center;
+            color: #00796b;
+            margin-bottom: 30px;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        
+        .login-card input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 15px;
+            margin-bottom: 18px;
+            transition: all 0.3s ease;
+            font-family: 'Poppins', sans-serif;
+        }
+        
+        .login-card input:focus {
+            outline: none;
+            border-color: #00796b;
+            box-shadow: 0 0 0 3px rgba(0,121,107,0.1);
+        }
+        
+        .login-card button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #00796b 0%, #004d40 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Poppins', sans-serif;
+        }
+        
+        .login-card button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,121,107,0.4);
+        }
+        
+        .login-card p {
+            text-align: center;
+            margin-top: 20px;
+            color: #546e7a;
+        }
+        
+        .login-card a {
+            color: #00796b;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        
+        .login-card a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Background Slideshow -->
+    <div class="bg-slideshow">
+        <div class="slide active" style="background-image: url('https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=1920');"></div>
+        <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1584036561566-baf8f5f1b144?w=1920');"></div>
+        <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1587854692152-cbe660dbde88?w=1920');"></div>
+        <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=1920');"></div>
+        <div class="slide" style="background-image: url('https://images.unsplash.com/photo-1559757175-5700dde675bc?w=1920');"></div>
+        <div class="bg-overlay"></div>
+    </div>
+    
+    <script>
+        // Slideshow functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const slides = document.querySelectorAll('.bg-slideshow .slide:not(.bg-overlay)');
+            let currentSlide = 0;
+            
+            function nextSlide() {
+                slides[currentSlide].classList.remove('active');
+                currentSlide = (currentSlide + 1) % slides.length;
+                slides[currentSlide].classList.add('active');
+            }
+            
+            // Change slide every 5 seconds
+            setInterval(nextSlide, 5000);
+        });
+    </script>
+
+    <!-- Vertical Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-brand">
+            <h2>
+                <i class="fas fa-hospital-alt hospital-icon"></i>
+                <i class="fas fa-virus virus-icon"></i> 
+                Malaria Detection
+            </h2>
+        </div>
+        
+        {% if session.get("user") %}
+        <ul class="nav-menu">
+            <li class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
+                <a href="/dashboard" class="nav-link">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+            </li>
+            
+            <!-- Patients Dropdown -->
+            <li class="nav-item dropdown">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-users"></i> Patients
+                    <span class="arrow">▸</span>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="/patients"><i class="fas fa-list"></i> View All Patients</a></li>
+                    <li><a href="/patients/add"><i class="fas fa-user-plus"></i> Add New Patient</a></li>
+                </ul>
+            </li>
+            
+            <!-- Staff & Departments Dropdown -->
+            <li class="nav-item dropdown">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-user-md"></i> Staff & Depts
+                    <span class="arrow">▸</span>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="/staff"><i class="fas fa-users"></i> View All Staff</a></li>
+                    <li><a href="/staff/add"><i class="fas fa-user-plus"></i> Add New Staff</a></li>
+                    <li class="dropdown-divider"></li>
+                    <li class="dropdown-header">Departments</li>
+                    <li><a href="/staff?dept=Doctors"><i class="fas fa-stethoscope"></i> Doctors</a></li>
+                    <li><a href="/staff?dept=Nursing"><i class="fas fa-user-nurse"></i> Nursing</a></li>
+                    <li><a href="/staff?dept=Laboratory"><i class="fas fa-flask"></i> Laboratory</a></li>
+                    <li><a href="/staff?dept=Pharmacy"><i class="fas fa-pills"></i> Pharmacy</a></li>
+                    <li><a href="/staff?dept=Administration"><i class="fas fa-briefcase"></i> Administration</a></li>
+                    <li><a href="/staff?dept=Reception"><i class="fas fa-concierge-bell"></i> Reception</a></li>
+                </ul>
+            </li>
+            
+            <!-- Predictions Dropdown -->
+            <li class="nav-item dropdown">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-microscope"></i> Predictions
+                    <span class="arrow">▸</span>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="/predict"><i class="fas fa-play"></i> Run Prediction</a></li>
+                    <li><a href="/dashboard"><i class="fas fa-chart-bar"></i> View Results</a></li>
+                </ul>
+            </li>
+            
+            <li class="nav-item">
+                <a href="/logout" class="nav-link">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </a>
+            </li>
+        </ul>
+        {% else %}
+        <ul class="nav-menu">
+            <li class="nav-item {% if request.endpoint == 'login' %}active{% endif %}">
+                <a href="/login" class="nav-link">
+                    <i class="fas fa-sign-in-alt"></i> Login
+                </a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'register' %}active{% endif %}">
+                <a href="/register" class="nav-link">
+                    <i class="fas fa-user-plus"></i> Register
+                </a>
+            </li>
+        </ul>
+        {% endif %}
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        {% if session.get("user") %}
+        <div class="top-header">
+            <h1>{% block header %}Dashboard{% endblock %}</h1>
+            <div class="user-info">
+                <span>Welcome, {{ session.get("user_name", "User") }}</span>
+                <div class="user-avatar">
+                    {{ session.get("user_name", "U")[0].upper() }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% block content %}{% endblock %}
+        
+        {% if not session.get("user") %}
+        <footer>
+            <p>© 2026 Hospital Malaria Detection System | Powered by AI</p>
+        </footer>
+        {% endif %}
+    </div>
+
+</body>
+
+</html>

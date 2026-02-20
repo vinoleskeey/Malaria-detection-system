@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block header %}Patients List{% endblock %}
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+    <h3 style="color: white; margin: 0;"><i class="fas fa-users"></i> All Patients</h3>
+    <a href="/patients/add" class="btn btn-primary">
+        <i class="fas fa-user-plus"></i> Add New Patient
+    </a>
+</div>
+
+<table>
+    <tr>
+        <th><i class="fas fa-id-card"></i> ID</th>
+        <th><i class="fas fa-user"></i> Name</th>
+        <th><i class="fas fa-birthday-cake"></i> Age</th>
+        <th><i class="fas fa-venus-mars"></i> Gender</th>
+        <th><i class="fas fa-cogs"></i> Actions</th>
+    </tr>
+    {% for patient in patients %}
+    <tr>
+        <td>{{ patient[0] }}</td>
+        <td><i class="fas fa-user-circle" style="color: #00796b;"></i> {{ patient[1] }}</td>
+        <td>{{ patient[2] }}</td>
+        <td>{{ patient[3] }}</td>
+        <td>
+            <a href="/patients/{{ patient[0] }}" class="badge badge-info" style="text-decoration: none;">
+                <i class="fas fa-eye"></i> View
+            </a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+
+{% endblock %}
