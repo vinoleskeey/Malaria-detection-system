@@ -491,7 +491,7 @@ def delete_staff(id):
 @login_required
 def list_users():
     db = get_db()
-    users = db.execute("SELECT id, name, email, created_at FROM users ORDER BY created_at DESC").fetchall()
+    users = db.execute("SELECT id, name, email FROM users ORDER BY id DESC").fetchall()
     db.close()
     return render_template("auth/list_users.html", users=users)
 
