@@ -486,6 +486,32 @@ def delete_staff(id):
     db.close()
     return redirect("/staff")
 
+# ------------------- USER MANAGEMENT ROUTES -------------------
+@app.route("/users", methods=["GET"])
+@login_required
+def list_users():
+    db = get_db()
+    users = db.execute("SELECT id, name, email, created_at FROM users ORDER BY created_at DESC").fetchall()
+    db.close()
+    return render_template("auth/list_users.html", users=users)
+
+@app.route("/users/<int:id>/delete")
+@login_required
+def delete_user(id):
+    # Prevent user from deleting themselves
+    if session.get("user") == id:
+        return "You cannot delete your own account!"
+    
+    db = get_db()
+    # First delete all predictions associated with patients owned by this user
+    db.execute("DELETE FROM predictions WHERE patient_id IN (SELECT id FROM patients WHERE user_id=?)", (id,))
+    db.execute("DELETE FROM patients WHERE user_id=?", (id,))
+    # Then delete the user
+    db.execute("DELETE FROM users WHERE id=?", (id,))
+    db.commit()
+    db.close()
+    return redirect("/users")
+
 # ------------------- RUN APP -------------------
 if __name__ == "__main__":
     app.run(debug=True)
