@@ -30,11 +30,19 @@ def init_db():
     c.execute("""
     CREATE TABLE IF NOT EXISTS patients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
         name TEXT NOT NULL,
         age INTEGER,
-        gender TEXT
+        gender TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
+    
+    # Add user_id column if it doesn't exist (for existing databases)
+    try:
+        c.execute("SELECT user_id FROM patients LIMIT 1")
+    except:
+        c.execute("ALTER TABLE patients ADD COLUMN user_id INTEGER")
     
     c.execute("""
     CREATE TABLE IF NOT EXISTS predictions (
