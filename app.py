@@ -232,6 +232,7 @@ def predict():
                 # Use absolute paths to avoid directory issues
                 abs_file_path = os.path.abspath(file_path)
                 abs_model_path = os.path.abspath(model_path)
+                print(f"Running prediction: python {predict_script} {abs_file_path} {abs_model_path}")
                 output = subprocess.check_output(
                     ["python", predict_script, abs_file_path, abs_model_path],
                     cwd=os.path.dirname(predict_script),
@@ -239,12 +240,17 @@ def predict():
                     timeout=240
                 )
                 output = output.decode("utf-8").strip()
+                print(f"Prediction output: {output}")
                 parts = output.split("|")
                 result = parts[0]
                 probability = float(parts[1])
                 malaria_score = float(parts[2])
                 no_malaria_score = float(parts[3])
+            except subprocess.CalledProcessError as e:
+                print(f"Subprocess error: {e.output.decode()}")
+                return f"Prediction failed: {e.output.decode()}"
             except Exception as e:
+                print(f"Prediction error: {str(e)}")
                 return f"Error running prediction: {str(e)}"
 
             db.execute(
