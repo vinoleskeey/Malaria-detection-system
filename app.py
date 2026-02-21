@@ -83,8 +83,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 def preload_model():
     """Preload model at startup"""
     global model
-    # Use the model from the malaria_model folder
-    model_dir = "C:/Users/VICTOR SHITTU/malaria_model"
+    # Use relative path - malaria_model folder is in the project directory
+    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
     model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
     
     print(f"[DEBUG] Model dir: {model_dir}")
@@ -260,7 +260,8 @@ def predict():
             file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(file_path)
 
-            model_dir = "C:/Users/VICTOR SHITTU/malaria_model"
+            # Use relative path - malaria_model folder is in the project directory
+            model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
             model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
             
             if not os.path.exists(model_dir):
