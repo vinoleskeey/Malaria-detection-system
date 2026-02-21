@@ -18,15 +18,21 @@ def init_db():
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
     
+    # Create users table with role column
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'patient',
+        phone TEXT,
+        address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
     
+    # Create patients table with user_id foreign key
     c.execute("""
     CREATE TABLE IF NOT EXISTS patients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,25 +40,40 @@ def init_db():
         name TEXT NOT NULL,
         age INTEGER,
         gender TEXT,
+        phone TEXT,
+        address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
     
     try:
+        c.execute("SELECT role FROM users LIMIT 1")
+    except:
+        c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'patient'")
+        c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+        c.execute("ALTER TABLE users ADD COLUMN address TEXT")
+    
+    try:
         c.execute("SELECT user_id FROM patients LIMIT 1")
     except:
         c.execute("ALTER TABLE patients ADD COLUMN user_id INTEGER")
+        c.execute("ALTER TABLE patients ADD COLUMN phone TEXT")
+        c.execute("ALTER TABLE patients ADD COLUMN address TEXT")
+        c.execute("ALTER TABLE patients ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     
     c.execute("""
     CREATE TABLE IF NOT EXISTS predictions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         patient_id INTEGER,
+        staff_id INTEGER,
         result TEXT,
         probability REAL,
         malaria_score REAL,
         no_malaria_score REAL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (patient_id) REFERENCES patients(id)
+        FOREIGN KEY (patient_id) REFERENCES patients(id),
+        FOREIGN KEY (staff_id) REFERENCES users(id)
     )
     """)
     
@@ -133,12 +154,31 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-# ------------------- LOGIN DECORATOR -------------------
+# ------------------- ROLE-BASED ACCESS DECORATORS -------------------
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if "user" not in session:
             return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated_function
+
+def staff_required(f):
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        if session.get("role") != "staff" and session.get("role") != "admin":
+            flash("Access denied. Staff access required.", "error")
+            return redirect("/dashboard")
+        return f(*args, **kwargs)
+    return decorated_function
+
+def patient_only(f):
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        if session.get("role") == "staff" or session.get("role") == "admin":
+            return f(*args, **kwargs)  # Staff can also access
         return f(*args, **kwargs)
     return decorated_function
 
@@ -149,16 +189,20 @@ def register():
         name = request.form["name"]
         email = request.form["email"]
         password = generate_password_hash(request.form["password"])
+        role = request.form.get("role", "patient")  # Default to patient
+        
         db = get_db()
         try:
-            db.execute("INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-                       (name, email, password))
+            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+                       (name, email, password, role))
             db.commit()
             db.close()
+            flash("Registration successful! Please login.", "success")
             return redirect("/login")
         except sqlite3.IntegrityError:
             db.close()
-            return "Email already registered!"
+            flash("Email already registered!", "error")
+            return render_template("auth/register.html")
     return render_template("auth/register.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -172,9 +216,15 @@ def login():
         if user and check_password_hash(user["password"], password):
             session["user"] = user["id"]
             session["user_name"] = user["name"]
-            return redirect("/dashboard")
+            session["role"] = user["role"]
+            
+            # Redirect based on role
+            if user["role"] == "staff" or user["role"] == "admin":
+                return redirect("/dashboard")
+            else:
+                return redirect("/dashboard")
         else:
-            flash("Invalid email or password!")
+            flash("Invalid email or password!", "error")
             return render_template("auth/login.html")
     return render_template("auth/login.html")
 
@@ -183,20 +233,80 @@ def logout():
     session.clear()
     return redirect("/login")
 
+# ------------------- PROFILE ROUTE -------------------
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    db = get_db()
+    user_id = session.get("user")
+    
+    if request.method == "POST":
+        name = request.form["name"]
+        phone = request.form.get("phone", "")
+        address = request.form.get("address", "")
+        
+        # Update user profile
+        db.execute("UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?",
+                   (name, phone, address, user_id))
+        db.commit()
+        
+        # Update session
+        session["user_name"] = name
+        
+        flash("Profile updated successfully!", "success")
+        user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        db.close()
+        return render_template("auth/profile.html", user=user)
+    
+    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    db.close()
+    return render_template("auth/profile.html", user=user)
+
 # ------------------- DASHBOARD -------------------
 @app.route("/dashboard")
 @login_required
 def dashboard():
     db = get_db()
-    total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
-    total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
-    high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
-    low_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) <= 50").fetchone()[0]
-    recent = db.execute(
-        "SELECT p.name, pr.result, pr.probability, pr.created_at "
-        "FROM predictions pr JOIN patients p ON pr.patient_id=p.id "
-        "ORDER BY pr.created_at DESC LIMIT 5"
-    ).fetchall()
+    user_id = session.get("user")
+    role = session.get("role")
+    
+    if role == "staff" or role == "admin":
+        # Staff/Admin see all data
+        total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
+        total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+        high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
+        low_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) <= 50").fetchone()[0]
+        recent = db.execute(
+            "SELECT p.name, pr.result, pr.probability, pr.created_at "
+            "FROM predictions pr JOIN patients p ON pr.patient_id=p.id "
+            "ORDER BY pr.created_at DESC LIMIT 5"
+        ).fetchall()
+    else:
+        # Patients only see their own predictions
+        total_patients = db.execute("SELECT COUNT(*) FROM patients WHERE user_id = ?", (user_id,)).fetchone()[0]
+        total_predictions = db.execute("""
+            SELECT COUNT(*) FROM predictions pr 
+            JOIN patients p ON pr.patient_id = p.id 
+            WHERE p.user_id = ?
+        """, (user_id,)).fetchone()[0]
+        high_risk = db.execute("""
+            SELECT COUNT(*) FROM predictions pr 
+            JOIN patients p ON pr.patient_id = p.id 
+            WHERE p.user_id = ? AND COALESCE(pr.malaria_score, 0) > 50
+        """, (user_id,)).fetchone()[0]
+        low_risk = db.execute("""
+            SELECT COUNT(*) FROM predictions pr 
+            JOIN patients p ON pr.patient_id = p.id 
+            WHERE p.user_id = ? AND COALESCE(pr.malaria_score, 0) <= 50
+        """, (user_id,)).fetchone()[0]
+        recent = db.execute("""
+            SELECT p.name, pr.result, pr.probability, pr.created_at
+            FROM predictions pr 
+            JOIN patients p ON pr.patient_id = p.id 
+            WHERE p.user_id = ?
+            ORDER BY pr.created_at DESC LIMIT 5
+        """, (user_id,)).fetchall()
+    
     recent_predictions = [tuple(row) for row in recent]
     db.close()
     return render_template("auth/dashboard.html",
@@ -212,31 +322,73 @@ def dashboard():
 @login_required
 def list_patients():
     db = get_db()
-    patients = db.execute("SELECT * FROM patients").fetchall()
+    user_id = session.get("user")
+    role = session.get("role")
+    
+    if role == "staff" or role == "admin":
+        # Staff/Admin see all patients
+        patients = db.execute("SELECT * FROM patients").fetchall()
+    else:
+        # Patients only see their own records
+        patients = db.execute("SELECT * FROM patients WHERE user_id = ?", (user_id,)).fetchall()
+    
     db.close()
     return render_template("auth/list_patients.html", patients=patients)
 
 @app.route("/patients/add", methods=["GET", "POST"])
-@login_required
+@staff_required
 def add_patient():
+    db = get_db()
+    user_id = session.get("user")
+    
     if request.method == "POST":
         name = request.form["name"]
         age = request.form["age"]
         gender = request.form["gender"]
-        db = get_db()
-        db.execute("INSERT INTO patients (name, age, gender) VALUES (?, ?, ?)",
-                   (name, age, gender))
+        phone = request.form.get("phone", "")
+        address = request.form.get("address", "")
+        
+        # Get selected user (patient) if staff is adding on behalf
+        patient_user_id = request.form.get("patient_user_id")
+        
+        if patient_user_id:
+            # Staff is creating a patient record for an existing user
+            db.execute(
+                "INSERT INTO patients (user_id, name, age, gender, phone, address) VALUES (?, ?, ?, ?, ?, ?)",
+                (patient_user_id, name, age, gender, phone, address)
+            )
+        else:
+            # Staff is creating a new patient (without linking to user)
+            db.execute(
+                "INSERT INTO patients (name, age, gender, phone, address) VALUES (?, ?, ?, ?, ?)",
+                (name, age, gender, phone, address)
+            )
+        
         db.commit()
         db.close()
         return redirect("/patients")
-    return render_template("auth/add_patients.html")
+    
+    # Get list of patient users for selection
+    patient_users = db.execute("SELECT id, name, email FROM users WHERE role = 'patient'").fetchall()
+    db.close()
+    return render_template("auth/add_patients.html", patient_users=patient_users)
 
 @app.route("/patients/<int:id>")
 @login_required
 def view_patient(id):
     db = get_db()
-    patient = db.execute("SELECT * FROM patients WHERE id=?", (id,)).fetchone()
-    predictions = db.execute("SELECT * FROM predictions WHERE patient_id=? ORDER BY created_at DESC", (id,)).fetchall()
+    user_id = session.get("user")
+    role = session.get("role")
+    
+    patient = db.execute("SELECT * FROM patients WHERE id = ?", (id,)).fetchone()
+    
+    # Check access
+    if role != "staff" and role != "admin" and patient["user_id"] != user_id:
+        db.close()
+        flash("Access denied. You can only view your own records.", "error")
+        return redirect("/patients")
+    
+    predictions = db.execute("SELECT * FROM predictions WHERE patient_id = ? ORDER BY created_at DESC", (id,)).fetchall()
     db.close()
     return render_template("auth/view_patients.html", patient=patient, predictions=predictions)
 
@@ -245,9 +397,10 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route("/predict", methods=["GET", "POST"])
-@login_required
+@staff_required
 def predict():
     db = get_db()
+    user_id = session.get("user")  # Staff ID
 
     if request.method == "POST":
         patient_id = request.form["patient_id"]
@@ -261,7 +414,6 @@ def predict():
             file.save(file_path)
 
             # Use relative path - malaria_model folder is in the project directory
-            # Use RELATIVE path - works on both local and Railway
             model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
             model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
             
@@ -315,9 +467,10 @@ def predict():
                 traceback.print_exc()
                 return f"Error running prediction: {str(e)}"
 
+            # Store prediction with staff_id who ran it
             db.execute(
-                "INSERT INTO predictions (patient_id, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?)",
-                (patient_id, result, probability, malaria_score, no_malaria_score)
+                "INSERT INTO predictions (patient_id, staff_id, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?, ?)",
+                (patient_id, user_id, result, probability, malaria_score, no_malaria_score)
             )
             db.commit()
             db.close()
@@ -331,13 +484,46 @@ def predict():
                 no_malaria_score=no_malaria_score
             )
 
+    # Staff can select from all patients
     patients = db.execute("SELECT * FROM patients").fetchall()
     db.close()
     return render_template("auth/predict.html", patients=patients)
 
+# ------------------- MY RESULTS (For Patients) -------------------
+@app.route("/my-results")
+@login_required
+def my_results():
+    """Patients can view their own prediction results"""
+    db = get_db()
+    user_id = session.get("user")
+    role = session.get("role")
+    
+    if role == "staff" or role == "admin":
+        # Staff can see all predictions too
+        predictions = db.execute("""
+            SELECT pr.*, p.name as patient_name, p.age, p.gender, u.name as staff_name
+            FROM predictions pr
+            JOIN patients p ON pr.patient_id = p.id
+            LEFT JOIN users u ON pr.staff_id = u.id
+            ORDER BY pr.created_at DESC
+        """).fetchall()
+    else:
+        # Patients see only their own predictions
+        predictions = db.execute("""
+            SELECT pr.*, p.name as patient_name, p.age, p.gender, u.name as staff_name
+            FROM predictions pr
+            JOIN patients p ON pr.patient_id = p.id
+            LEFT JOIN users u ON pr.staff_id = u.id
+            WHERE p.user_id = ?
+            ORDER BY pr.created_at DESC
+        """, (user_id,)).fetchall()
+    
+    db.close()
+    return render_template("auth/my_results.html", predictions=predictions)
+
 # ------------------- STAFF -------------------
 @app.route("/staff")
-@login_required
+@staff_required
 def list_staff():
     db = get_db()
     staff_members = db.execute("SELECT * FROM staff ORDER BY created_at DESC").fetchall()
@@ -349,7 +535,7 @@ def list_staff():
     return render_template("staff/list_staff.html", staff_members=staff_members, department_counts=department_counts)
 
 @app.route("/staff/add", methods=["GET", "POST"])
-@login_required
+@staff_required
 def add_staff():
     if request.method == "POST":
         name = request.form["name"]
@@ -370,32 +556,32 @@ def add_staff():
     return render_template("staff/add_staff.html")
 
 @app.route("/staff/<int:id>/delete")
-@login_required
+@staff_required
 def delete_staff(id):
     db = get_db()
-    db.execute("DELETE FROM staff WHERE id=?", (id,))
+    db.execute("DELETE FROM staff WHERE id = ?", (id,))
     db.commit()
     db.close()
     return redirect("/staff")
 
 # ------------------- USERS -------------------
 @app.route("/users")
-@login_required
+@staff_required
 def list_users():
     db = get_db()
-    users = db.execute("SELECT id, name, email FROM users ORDER BY id DESC").fetchall()
+    users = db.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC").fetchall()
     db.close()
     return render_template("auth/list_users.html", users=users)
 
 @app.route("/users/<int:id>/delete")
-@login_required
+@staff_required
 def delete_user(id):
     if session.get("user") == id:
         return "You cannot delete your own account!"
     db = get_db()
-    db.execute("DELETE FROM predictions WHERE patient_id IN (SELECT id FROM patients WHERE user_id=?)", (id,))
-    db.execute("DELETE FROM patients WHERE user_id=?", (id,))
-    db.execute("DELETE FROM users WHERE id=?", (id,))
+    db.execute("DELETE FROM predictions WHERE patient_id IN (SELECT id FROM patients WHERE user_id = ?)", (id,))
+    db.execute("DELETE FROM patients WHERE user_id = ?", (id,))
+    db.execute("DELETE FROM users WHERE id = ?", (id,))
     db.commit()
     db.close()
     return redirect("/users")
@@ -406,14 +592,14 @@ def forgot_password():
     if request.method == "POST":
         email = request.form["email"]
         db = get_db()
-        user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         db.close()
         
         if user:
-            flash("If that email exists, a password reset link has been sent!")
+            flash("If that email exists, a password reset link has been sent!", "success")
             return render_template("auth/forgot_password.html", success=True)
         else:
-            flash("If that email exists, a password reset link has been sent!")
+            flash("If that email exists, a password reset link has been sent!", "success")
             return render_template("auth/forgot_password.html", success=True)
     
     return render_template("auth/forgot_password.html")
@@ -425,10 +611,10 @@ def reset_password(token):
         confirm_password = request.form["confirm_password"]
         
         if password != confirm_password:
-            flash("Passwords do not match!")
+            flash("Passwords do not match!", "error")
             return render_template("auth/reset_password.html", token=token)
         
-        flash("Password reset successful! Please login with your new password.")
+        flash("Password reset successful! Please login with your new password.", "success")
         return redirect("/login")
     
     return render_template("auth/reset_password.html", token=token)

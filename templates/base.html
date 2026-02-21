@@ -668,6 +668,9 @@
                 </a>
             </li>
             
+            {% if session.get("role") == "staff" or session.get("role") == "admin" %}
+            <!-- Staff/Admin: Full Access -->
+            
             <!-- Patients Dropdown -->
             <li class="nav-item dropdown">
                 <a href="#" class="nav-link">
@@ -710,6 +713,32 @@
                     <li><a href="/predict"><i class="fas fa-play"></i> Run Prediction</a></li>
                     <li><a href="/dashboard"><i class="fas fa-chart-bar"></i> View Results</a></li>
                 </ul>
+            </li>
+            
+            {% else %}
+            <!-- Patients: Limited Access -->
+            
+            <!-- My Results -->
+            <li class="nav-item {% if request.endpoint == 'my_results' %}active{% endif %}">
+                <a href="/my-results" class="nav-link">
+                    <i class="fas fa-file-medical-alt"></i> My Results
+                </a>
+            </li>
+            
+            <!-- My Patients -->
+            <li class="nav-item {% if request.endpoint == 'list_patients' %}active{% endif %}">
+                <a href="/patients" class="nav-link">
+                    <i class="fas fa-users"></i> My Records
+                </a>
+            </li>
+            
+            {% endif %}
+            
+            <!-- Profile (Available to all logged in users) -->
+            <li class="nav-item {% if request.endpoint == 'profile' %}active{% endif %}">
+                <a href="/profile" class="nav-link">
+                    <i class="fas fa-user-cog"></i> My Profile
+                </a>
             </li>
             
             <li class="nav-item">

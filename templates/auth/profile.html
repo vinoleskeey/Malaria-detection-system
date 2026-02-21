@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block header %}My Profile{% endblock %}
+{% block content %}
+
+<div class="form-container" style="max-width: 600px;">
+    <h2 style="color: #00796b; margin-bottom: 30px; text-align: center;">
+        <i class="fas fa-user-cog"></i> Profile Settings
+    </h2>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">
+                    <i class="fas fa-info-circle"></i> {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <form method="post">
+        <div class="form-group">
+            <label><i class="fas fa-user"></i> Full Name</label>
+            <input type="text" name="name" value="{{ user.name }}" required>
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-envelope"></i> Email Address</label>
+            <input type="email" value="{{ user.email }}" disabled style="background: #e9ecef; cursor: not-allowed;">
+            <small style="color: #666;">Email cannot be changed</small>
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-phone"></i> Phone Number</label>
+            <input type="text" name="phone" value="{{ user.phone or '' }}" placeholder="Enter phone number">
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-map-marker-alt"></i> Address</label>
+            <input type="text" name="address" value="{{ user.address or '' }}" placeholder="Enter address">
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-user-tag"></i> Account Type</label>
+            <input type="text" value="{{ user.role|title }}" disabled style="background: #e9ecef; cursor: not-allowed;">
+        </div>
+        
+        <div class="form-group">
+            <label><i class="fas fa-calendar-plus"></i> Member Since</label>
+            <input type="text" value="{{ user.created_at or 'N/A' }}" disabled style="background: #e9ecef; cursor: not-allowed;">
+        </div>
+        
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+            <i class="fas fa-save"></i> Update Profile
+        </button>
+    </form>
+</div>
+
+<style>
+    .form-container {
+        background: #fff;
+        padding: 40px;
+        border-radius: 16px;
+        box-shadow: 0 4px 25px rgba(0,0,0,0.08);
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    
+    .form-group {
+        margin-bottom: 22px;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: #37474f;
+        font-weight: 500;
+        font-size: 14px;
+    }
+    
+    .form-group input {
+        width: 100%;
+        padding: 14px 18px;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        font-size: 15px;
+        transition: all 0.3s ease;
+        font-family: 'Poppins', sans-serif;
+    }
+    
+    .form-group input:focus {
+        outline: none;
+        border-color: #00796b;
+        box-shadow: 0 0 0 3px rgba(0,121,107,0.1);
+    }
+    
+    .form-group small {
+        display: block;
+        margin-top: 5px;
+        font-size: 12px;
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #00796b 0%, #004d40 100%);
+        color: white;
+        padding: 14px 24px;
+        border-radius: 10px;
+        border: none;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        font-family: 'Poppins', sans-serif;
+    }
+    
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 15px rgba(0,121,107,0.4);
+    }
+    
+    .alert {
+        padding: 16px 22px;
+        border-radius: 12px;
+        margin-bottom: 22px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .alert-success {
+        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+        color: #155724;
+        border-left: 4px solid #28a745;
+    }
+    
+    .alert-error {
+        background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+        color: #721c24;
+        border-left: 4px solid #dc3545;
+    }
+</style>
+
+{% endblock %}

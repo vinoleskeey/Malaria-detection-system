@@ -27,6 +27,19 @@
             </select>
         </div>
         
+        {% if patient_users %}
+        <div class="form-group">
+            <label><i class="fas fa-user-tag"></i> Link to Patient Account (Optional)</label>
+            <select name="patient_user_id" style="background: #f8f9fa;">
+                <option value="">-- Select Patient User --</option>
+                {% for pu in patient_users %}
+                <option value="{{ pu.id }}">{{ pu.name }} ({{ pu.email }})</option>
+                {% endfor %}
+            </select>
+            <small style="color: #666;">Leave empty if patient doesn't have an account</small>
+        </div>
+        {% endif %}
+        
         <button type="submit" class="btn btn-primary" style="width: 100%; padding: 15px; font-size: 16px;">
             <i class="fas fa-plus-circle"></i> Add Patient
         </button>
