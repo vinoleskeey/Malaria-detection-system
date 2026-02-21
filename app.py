@@ -261,8 +261,14 @@ def predict():
             file.save(file_path)
 
             # Use relative path - malaria_model folder is in the project directory
+            # Use RELATIVE path - works on both local and Railway
             model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
             model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
+            
+            print(f"[DEBUG] Model directory: {model_dir}")
+            print(f"[DEBUG] Model file: {model_file}")
+            print(f"[DEBUG] Model dir exists: {os.path.exists(model_dir)}")
+            print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
             
             if not os.path.exists(model_dir):
                 return "Error: malaria_model directory not found."
@@ -272,22 +278,17 @@ def predict():
                 return f"Error: Uploaded file not found at {file_path}"
             
             try:
+                # Try to use preloaded model first
                 tf_model = load_model()
+                
                 if tf_model is None:
-                    # Try to load model directly if preloaded model is None
-                    try:
-                        import tensorflow as tf
-                        tf.config.threading.set_intra_op_parallelism_threads(1)
-                        tf.config.threading.set_inter_op_parallelism_threads(1)
-                        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model", "malaria_cnn_model.keras")
-                        print(f"[DEBUG] Loading model from: {model_path}")
-                        tf_model = tf.keras.models.load_model(model_path)
-                        print("[DEBUG] Model loaded successfully in predict route!")
-                    except Exception as e:
-                        print(f"[DEBUG] Failed to load model: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        return f"Error: Could not load TensorFlow model - {str(e)}"
+                    # If preload failed, try loading directly
+                    import tensorflow as tf
+                    tf.config.threading.set_intra_op_parallelism_threads(1)
+                    tf.config.threading.set_inter_op_parallelism_threads(1)
+                    print(f"[DEBUG] Loading model directly from: {model_file}")
+                    tf_model = tf.keras.models.load_model(model_file)
+                    print("[DEBUG] Model loaded successfully!")
                 
                 from tensorflow.keras.preprocessing import image
                 img = image.load_img(file_path, target_size=(128, 128))
@@ -310,6 +311,8 @@ def predict():
                 
             except Exception as e:
                 print(f"Prediction error: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return f"Error running prediction: {str(e)}"
 
             db.execute(
