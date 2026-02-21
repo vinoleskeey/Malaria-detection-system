@@ -82,18 +82,32 @@ model_path = None
 def load_model():
     global model, model_path
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_file = os.path.join(base_dir, "malaria_model", "malaria_cnn_model.keras")
+    model_dir = os.path.join(base_dir, "malaria_model")
+    model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
     
-    if os.path.exists(model_file) and model_path != model_file:
+    print(f"[DEBUG] Base dir: {base_dir}")
+    print(f"[DEBUG] Model dir exists: {os.path.exists(model_dir)}")
+    if os.path.exists(model_dir):
+        print(f"[DEBUG] Model dir contents: {os.listdir(model_dir)}")
+    print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
+    
+    if os.path.exists(model_file):
+        if model_path == model_file and model is not None:
+            print("[DEBUG] Model already loaded, returning cached model")
+            return model
         try:
             import tensorflow as tf
-            print(f"Loading model from {model_file}...")
+            print(f"[DEBUG] Loading model from {model_file}...")
             model = tf.keras.models.load_model(model_file)
             model_path = model_file
-            print("Model loaded successfully!")
+            print("[DEBUG] Model loaded successfully!")
         except Exception as e:
-            print(f"Error loading model: {e}")
+            print(f"[DEBUG] Error loading model: {e}")
+            import traceback
+            traceback.print_exc()
             model = None
+    else:
+        print(f"[DEBUG] Model file not found at: {model_file}")
     return model
 
 # ------------------- ROOT ROUTE -------------------
