@@ -384,10 +384,20 @@ def predict():
             predict_script = os.path.join(model_dir, "malaria_predict.py")
             model_path = os.path.join(model_dir, "malaria_cnn_model.keras")
             
+            # Debug: Check if files exist
+            if not os.path.exists(predict_script):
+                return f"Error: Predict script not found at {predict_script}"
+            if not os.path.exists(model_path):
+                return f"Error: Model file not found at {model_path}"
+            if not os.path.exists(file_path):
+                return f"Error: Uploaded file not found at {file_path}"
+            
             try:
                 output = subprocess.check_output(
                     ["python", predict_script, file_path, model_path],
-                    cwd=base_dir
+                    cwd=model_dir,
+                    stderr=subprocess.STDOUT,
+                    timeout=120
                 )
                 output = output.decode("utf-8").strip()
                 parts = output.split("|")
@@ -395,8 +405,10 @@ def predict():
                 probability = float(parts[1])
                 malaria_score = float(parts[2])
                 no_malaria_score = float(parts[3])
+            except subprocess.TimeoutExpired:
+                return "Error: Prediction timed out. Please try a smaller image."
             except Exception as e:
-                return f"Error running prediction: {e}"
+                return f"Error running prediction: {str(e)}"
 
             db.execute(
                 "INSERT INTO predictions (patient_id, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?)",
