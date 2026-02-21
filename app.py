@@ -4,9 +4,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import sqlite3
 import os
-import subprocess
 import time
 import secrets
+import numpy as np
 
 # ------------------- APP SETUP -------------------
 app = Flask(__name__)
@@ -66,6 +66,27 @@ def init_db():
     print("Database initialized!")
 
 init_db()
+
+# ------------------- LOAD TENSORFLOW MODEL -------------------
+model = None
+model_path = None
+
+def load_model():
+    global model, model_path
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_file = os.path.join(base_dir, "malaria_model", "malaria_cnn_model.keras")
+    
+    if os.path.exists(model_file) and model_path != model_file:
+        try:
+            import tensorflow as tf
+            print(f"Loading model from {model_file}...")
+            model = tf.keras.models.load_model(model_file)
+            model_path = model_file
+            print("Model loaded successfully!")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            model = None
+    return model
 
 # ------------------- ROOT ROUTE -------------------
 @app.route("/")
@@ -214,41 +235,43 @@ def predict():
 
             base_dir = os.path.dirname(os.path.abspath(__file__))
             model_dir = os.path.join(base_dir, "malaria_model")
+            model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
             
             if not os.path.exists(model_dir):
                 return "Error: malaria_model directory not found."
-            
-            predict_script = os.path.join(model_dir, "malaria_predict.py")
-            model_path = os.path.join(model_dir, "malaria_cnn_model.keras")
-            
-            if not os.path.exists(predict_script):
-                return f"Error: Predict script not found at {predict_script}"
-            if not os.path.exists(model_path):
-                return f"Error: Model file not found at {model_path}"
+            if not os.path.exists(model_file):
+                return f"Error: Model file not found at {model_file}"
             if not os.path.exists(file_path):
                 return f"Error: Uploaded file not found at {file_path}"
             
             try:
-                # Use absolute paths to avoid directory issues
-                abs_file_path = os.path.abspath(file_path)
-                abs_model_path = os.path.abspath(model_path)
-                print(f"Running prediction: python {predict_script} {abs_file_path} {abs_model_path}")
-                output = subprocess.check_output(
-                    ["python", predict_script, abs_file_path, abs_model_path],
-                    cwd=os.path.dirname(predict_script),
-                    stderr=subprocess.STDOUT,
-                    timeout=240
-                )
-                output = output.decode("utf-8").strip()
-                print(f"Prediction output: {output}")
-                parts = output.split("|")
-                result = parts[0]
-                probability = float(parts[1])
-                malaria_score = float(parts[2])
-                no_malaria_score = float(parts[3])
-            except subprocess.CalledProcessError as e:
-                print(f"Subprocess error: {e.output.decode()}")
-                return f"Prediction failed: {e.output.decode()}"
+                # Load model
+                tf_model = load_model()
+                if tf_model is None:
+                    return "Error: Could not load TensorFlow model"
+                
+                # Load and preprocess image
+                from tensorflow.keras.preprocessing import image
+                img = image.load_img(file_path, target_size=(128, 128))
+                img_array = image.img_to_array(img)
+                img_array = np.expand_dims(img_array, axis=0)
+                
+                # Predict
+                pred = tf_model.predict(img_array, verbose=0)[0][0]
+                
+                # Calculate scores
+                malaria_score = float(pred * 100)
+                no_malaria_score = float((1 - pred) * 100)
+                
+                if pred > 0.5:
+                    result = "Malaria Detected"
+                    probability = malaria_score
+                else:
+                    result = "No Malaria"
+                    probability = no_malaria_score
+                
+                print(f"Prediction: {result}, Probability: {probability}")
+                
             except Exception as e:
                 print(f"Prediction error: {str(e)}")
                 return f"Error running prediction: {str(e)}"
