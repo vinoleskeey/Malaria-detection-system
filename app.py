@@ -274,7 +274,20 @@ def predict():
             try:
                 tf_model = load_model()
                 if tf_model is None:
-                    return "Error: Could not load TensorFlow model"
+                    # Try to load model directly if preloaded model is None
+                    try:
+                        import tensorflow as tf
+                        tf.config.threading.set_intra_op_parallelism_threads(1)
+                        tf.config.threading.set_inter_op_parallelism_threads(1)
+                        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model", "malaria_cnn_model.keras")
+                        print(f"[DEBUG] Loading model from: {model_path}")
+                        tf_model = tf.keras.models.load_model(model_path)
+                        print("[DEBUG] Model loaded successfully in predict route!")
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to load model: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return f"Error: Could not load TensorFlow model - {str(e)}"
                 
                 from tensorflow.keras.preprocessing import image
                 img = image.load_img(file_path, target_size=(128, 128))
