@@ -364,15 +364,22 @@ def predict():
             file.save(file_path)
 
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            local_model_dir = os.path.join(base_dir, "malaria_model")
-            parent_model_dir = os.path.join(base_dir, "..", "..", "malaria_model")
+            # Try multiple possible locations for the model on Render
+            possible_model_dirs = [
+                os.path.join(base_dir, "malaria_model"),
+                os.path.join(os.getcwd(), "malaria_model"),
+                os.path.join(base_dir, "..", "malaria_model"),
+                os.path.join(base_dir, "..", "..", "malaria_model"),
+            ]
             
-            if os.path.exists(local_model_dir):
-                model_dir = local_model_dir
-            elif os.path.exists(parent_model_dir):
-                model_dir = parent_model_dir
-            else:
-                return "Error: malaria_model directory not found."
+            model_dir = None
+            for possible_dir in possible_model_dirs:
+                if os.path.exists(possible_dir) and os.path.isdir(possible_dir):
+                    model_dir = possible_dir
+                    break
+            
+            if not model_dir:
+                return f"Error: malaria_model directory not found."
             
             predict_script = os.path.join(model_dir, "malaria_predict.py")
             model_path = os.path.join(model_dir, "malaria_cnn_model.keras")
