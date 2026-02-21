@@ -79,6 +79,9 @@ init_db()
 model = None
 model_path = None
 
+# Limit TensorFlow memory usage to prevent OOM on Render
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 def load_model():
     global model, model_path
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +100,10 @@ def load_model():
             return model
         try:
             import tensorflow as tf
+            # Limit CPU threads to reduce memory usage
+            tf.config.threading.set_intra_op_parallelism_threads(1)
+            tf.config.threading.set_inter_op_parallelism_threads(1)
+            
             print(f"[DEBUG] Loading model from {model_file}...")
             model = tf.keras.models.load_model(model_file)
             model_path = model_file
