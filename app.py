@@ -83,7 +83,7 @@ model_path = None
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 def load_model():
-    global model, model_path
+    global model
     base_dir = os.path.dirname(os.path.abspath(__file__))
     model_dir = os.path.join(base_dir, "malaria_model")
     model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
@@ -94,19 +94,18 @@ def load_model():
         print(f"[DEBUG] Model dir contents: {os.listdir(model_dir)}")
     print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
     
+    if model is not None:
+        print("[DEBUG] Using preloaded model")
+        return model
+    
     if os.path.exists(model_file):
-        if model_path == model_file and model is not None:
-            print("[DEBUG] Model already loaded, returning cached model")
-            return model
         try:
             import tensorflow as tf
-            # Limit CPU threads to reduce memory usage
             tf.config.threading.set_intra_op_parallelism_threads(1)
             tf.config.threading.set_inter_op_parallelism_threads(1)
             
             print(f"[DEBUG] Loading model from {model_file}...")
             model = tf.keras.models.load_model(model_file)
-            model_path = model_file
             print("[DEBUG] Model loaded successfully!")
         except Exception as e:
             print(f"[DEBUG] Error loading model: {e}")
