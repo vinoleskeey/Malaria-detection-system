@@ -38,7 +38,6 @@ def init_db():
     )
     """)
     
-    # Add user_id column if it doesn't exist (for existing databases)
     try:
         c.execute("SELECT user_id FROM patients LIMIT 1")
     except:
@@ -77,26 +76,20 @@ init_db()
 
 # ------------------- LOAD TENSORFLOW MODEL -------------------
 model = None
-model_path = None
 
-# Limit TensorFlow memory usage to prevent OOM on Render
+# Limit TensorFlow memory usage
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-def load_model():
+def preload_model():
+    """Preload model at startup"""
     global model
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_dir = os.path.join(base_dir, "malaria_model")
+    # Use the model from the malaria_model folder
+    model_dir = "C:/Users/VICTOR SHITTU/malaria_model"
     model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
     
-    print(f"[DEBUG] Base dir: {base_dir}")
+    print(f"[DEBUG] Model dir: {model_dir}")
     print(f"[DEBUG] Model dir exists: {os.path.exists(model_dir)}")
-    if os.path.exists(model_dir):
-        print(f"[DEBUG] Model dir contents: {os.listdir(model_dir)}")
     print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
-    
-    if model is not None:
-        print("[DEBUG] Using preloaded model")
-        return model
     
     if os.path.exists(model_file):
         try:
@@ -106,7 +99,7 @@ def load_model():
             
             print(f"[DEBUG] Loading model from {model_file}...")
             model = tf.keras.models.load_model(model_file)
-            print("[DEBUG] Model loaded successfully!")
+            print("[DEBUG] Model loaded at startup!")
         except Exception as e:
             print(f"[DEBUG] Error loading model: {e}")
             import traceback
@@ -114,6 +107,12 @@ def load_model():
             model = None
     else:
         print(f"[DEBUG] Model file not found at: {model_file}")
+    return model
+
+print("[DEBUG] Starting model preload...")
+preload_model()
+
+def load_model():
     return model
 
 # ------------------- ROOT ROUTE -------------------
@@ -261,8 +260,7 @@ def predict():
             file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(file_path)
 
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            model_dir = os.path.join(base_dir, "malaria_model")
+            model_dir = "C:/Users/VICTOR SHITTU/malaria_model"
             model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
             
             if not os.path.exists(model_dir):
@@ -273,21 +271,17 @@ def predict():
                 return f"Error: Uploaded file not found at {file_path}"
             
             try:
-                # Load model
                 tf_model = load_model()
                 if tf_model is None:
                     return "Error: Could not load TensorFlow model"
                 
-                # Load and preprocess image
                 from tensorflow.keras.preprocessing import image
                 img = image.load_img(file_path, target_size=(128, 128))
                 img_array = image.img_to_array(img)
                 img_array = np.expand_dims(img_array, axis=0)
                 
-                # Predict
                 pred = tf_model.predict(img_array, verbose=0)[0][0]
                 
-                # Calculate scores
                 malaria_score = float(pred * 100)
                 no_malaria_score = float((1 - pred) * 100)
                 
