@@ -26,6 +26,7 @@ def init_db():
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
     
+    # Create users table first
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,6 +36,7 @@ def init_db():
     )
     """)
     
+    # Create patients table (without user_id first)
     c.execute("""
     CREATE TABLE IF NOT EXISTS patients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +45,15 @@ def init_db():
         gender TEXT
     )
     """)
+    
+    # Add user_id column if it doesn't exist (for linking patients to users)
+    try:
+        c.execute("SELECT user_id FROM patients LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            c.execute("ALTER TABLE patients ADD COLUMN user_id INTEGER")
+        except:
+            pass  # Column might already exist
     
     c.execute("""
     CREATE TABLE IF NOT EXISTS predictions (
