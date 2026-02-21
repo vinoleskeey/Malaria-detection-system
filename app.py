@@ -237,27 +237,13 @@ def forgot_password():
             session["reset_email"] = email
             session["reset_token"] = reset_token
             
-            # Try to send email, but continue with demo mode if it fails
-            if SMTP_USERNAME and FROM_EMAIL:
-                success, message = send_password_reset_email(email, reset_token)
-                if success:
-                    return render_template("auth/forgot_password.html", 
-                                           success="Password reset link sent to your email!")
-                else:
-                    # If email fails, show demo mode (for development)
-                    print(f"Email sending failed: {message}")
-                    return render_template("auth/reset_password.html", 
-                                           email=email, 
-                                           token=reset_token,
-                                           show_token=True,
-                                           email_error="Email could not be sent. Using demo mode instead.")
-            else:
-                # No email config - show demo mode
-                return render_template("auth/reset_password.html", 
-                                       email=email, 
-                                       token=reset_token,
-                                       show_token=True,
-                                       email_error="Email not configured. Using demo mode.")
+            # Always use demo mode on Render (email sending often fails on cloud platforms)
+            # The reset token is shown directly on the page for password reset
+            return render_template("auth/reset_password.html", 
+                                   email=email, 
+                                   token=reset_token,
+                                   show_token=True,
+                                   email_error="Demo mode: Use the reset link below to reset your password.")
         else:
             return render_template("auth/forgot_password.html", 
                                    error="Email not found! Please register first.")
