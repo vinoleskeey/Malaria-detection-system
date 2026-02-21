@@ -20,63 +20,115 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 def init_db():
     """
     Automatically initialize the database and create tables if they don't exist.
-    This ensures the app works on deployment without manual setup.
+    Works with both SQLite (local) and PostgreSQL (Render).
     """
-    import sqlite3
+    database_url = os.environ.get('DATABASE_URL')
     
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
-    
-    # ----------------- USERS TABLE -----------------
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
-    )
-    """)
-    
-    # ----------------- PATIENTS TABLE -----------------
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS patients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        age INTEGER,
-        gender TEXT
-    )
-    """)
-    
-    # ----------------- PREDICTIONS TABLE -----------------
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS predictions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        patient_id INTEGER,
-        result TEXT,
-        probability REAL,
-        malaria_score REAL,
-        no_malaria_score REAL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (patient_id) REFERENCES patients(id)
-    )
-    """)
-    
-    # ----------------- STAFF TABLE -----------------
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS staff (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        phone TEXT,
-        role TEXT NOT NULL,
-        department TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    
-    conn.commit()
-    conn.close()
-    print("✅ Database initialized successfully!")
+    if database_url:
+        # PostgreSQL on Render
+        import psycopg2
+        conn = psycopg2.connect(database_url)
+        c = conn.cursor()
+        
+        # Create tables for PostgreSQL
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+        """)
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS patients (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            age INTEGER,
+            gender TEXT
+        )
+        """)
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS predictions (
+            id SERIAL PRIMARY KEY,
+            patient_id INTEGER,
+            result TEXT,
+            probability REAL,
+            malaria_score REAL,
+            no_malaria_score REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        )
+        """)
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS staff (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            phone TEXT,
+            role TEXT NOT NULL,
+            department TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        conn.commit()
+        conn.close()
+        print("✅ PostgreSQL database initialized!")
+    else:
+        # SQLite for local development
+        import sqlite3
+        conn = sqlite3.connect("database.db")
+        c = conn.cursor()
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+        """)
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS patients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            age INTEGER,
+            gender TEXT
+        )
+        """)
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER,
+            result TEXT,
+            probability REAL,
+            malaria_score REAL,
+            no_malaria_score REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        )
+        """)
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS staff (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            phone TEXT,
+            role TEXT NOT NULL,
+            department TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+        
+        conn.commit()
+        conn.close()
+        print("✅ SQLite database initialized!")
 
 # Initialize database on app startup
 init_db()
