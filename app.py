@@ -226,18 +226,9 @@ def predict():
             file.save(file_path)
 
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            possible_model_dirs = [
-                os.path.join(base_dir, "malaria_model"),
-                os.path.join(os.getcwd(), "malaria_model"),
-            ]
+            model_dir = os.path.join(base_dir, "malaria_model")
             
-            model_dir = None
-            for possible_dir in possible_model_dirs:
-                if os.path.exists(possible_dir) and os.path.isdir(possible_dir):
-                    model_dir = possible_dir
-                    break
-            
-            if not model_dir:
+            if not os.path.exists(model_dir):
                 return "Error: malaria_model directory not found."
             
             predict_script = os.path.join(model_dir, "malaria_predict.py")
@@ -247,11 +238,16 @@ def predict():
                 return f"Error: Predict script not found at {predict_script}"
             if not os.path.exists(model_path):
                 return f"Error: Model file not found at {model_path}"
+            if not os.path.exists(file_path):
+                return f"Error: Uploaded file not found at {file_path}"
             
             try:
+                # Use absolute paths to avoid directory issues
+                abs_file_path = os.path.abspath(file_path)
+                abs_model_path = os.path.abspath(model_path)
                 output = subprocess.check_output(
-                    ["python", predict_script, file_path, model_path],
-                    cwd=model_dir,
+                    ["python", predict_script, abs_file_path, abs_model_path],
+                    cwd=os.path.dirname(predict_script),
                     stderr=subprocess.STDOUT,
                     timeout=240
                 )
