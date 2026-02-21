@@ -67,19 +67,6 @@ def init_db():
 
 init_db()
 
-# ------------------- PRELOAD MODEL -------------------
-print("Loading ML model...")
-try:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(base_dir, "malaria_model", "malaria_cnn_model.keras")
-    if os.path.exists(model_path):
-        import tensorflow as tf
-        global loaded_model
-        loaded_model = tf.keras.models.load_model(model_path)
-        print("Model preloaded!")
-except Exception as e:
-    print(f"Model preload: {e}")
-
 # ------------------- ROOT ROUTE -------------------
 @app.route("/")
 def index():
