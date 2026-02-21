@@ -13,122 +13,65 @@ from email.mime.multipart import MIMEMultipart
 
 # ------------------- APP SETUP -------------------
 app = Flask(__name__)
-# Use environment variable for secret key (production) or generate one for development
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # ------------------- AUTO DATABASE INITIALIZATION -------------------
 def init_db():
     """
     Automatically initialize the database and create tables if they don't exist.
-    Works with both SQLite (local) and PostgreSQL (Render).
+    Uses SQLite for both local and Render deployment.
     """
-    database_url = os.environ.get('DATABASE_URL')
+    import sqlite3
     
-    if database_url:
-        # PostgreSQL on Render
-        import psycopg2
-        conn = psycopg2.connect(database_url)
-        c = conn.cursor()
-        
-        # Create tables for PostgreSQL
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-        """)
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS patients (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            age INTEGER,
-            gender TEXT
-        )
-        """)
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS predictions (
-            id SERIAL PRIMARY KEY,
-            patient_id INTEGER,
-            result TEXT,
-            probability REAL,
-            malaria_score REAL,
-            no_malaria_score REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (patient_id) REFERENCES patients(id)
-        )
-        """)
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS staff (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            phone TEXT,
-            role TEXT NOT NULL,
-            department TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        
-        conn.commit()
-        conn.close()
-        print("✅ PostgreSQL database initialized!")
-    else:
-        # SQLite for local development
-        import sqlite3
-        conn = sqlite3.connect("database.db")
-        c = conn.cursor()
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-        """)
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS patients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            age INTEGER,
-            gender TEXT
-        )
-        """)
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS predictions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            result TEXT,
-            probability REAL,
-            malaria_score REAL,
-            no_malaria_score REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (patient_id) REFERENCES patients(id)
-        )
-        """)
-        
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS staff (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            phone TEXT,
-            role TEXT NOT NULL,
-            department TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """)
-        
-        conn.commit()
-        conn.close()
-        print("✅ SQLite database initialized!")
+    conn = sqlite3.connect("database.db")
+    c = conn.cursor()
+    
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL
+    )
+    """)
+    
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS patients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        age INTEGER,
+        gender TEXT
+    )
+    """)
+    
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS predictions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER,
+        result TEXT,
+        probability REAL,
+        malaria_score REAL,
+        no_malaria_score REAL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (patient_id) REFERENCES patients(id)
+    )
+    """)
+    
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS staff (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        phone TEXT,
+        role TEXT NOT NULL,
+        department TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
+    conn.commit()
+    conn.close()
+    print("✅ SQLite database initialized!")
 
 # Initialize database on app startup
 init_db()
@@ -147,24 +90,11 @@ if not os.path.exists(UPLOAD_FOLDER):
 # ------------------- DATABASE CONFIGURATION -------------------
 def get_db():
     """
-    Get database connection.
-    Uses PostgreSQL on Render (detected via DATABASE_URL env var),
-    otherwise falls back to SQLite for local development.
+    Get database connection - always uses SQLite.
     """
-    database_url = os.environ.get('DATABASE_URL')
-    
-    if database_url:
-        # Use PostgreSQL on Render
-        import psycopg2
-        from psycopg2.extras import RealDictCursor
-        conn = psycopg2.connect(database_url)
-        conn.row_factory = RealDictCursor
-        return conn
-    else:
-        # Use SQLite for local development
-        conn = sqlite3.connect("database.db")
-        conn.row_factory = sqlite3.Row
-        return conn
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # ------------------- LOGIN REQUIRED DECORATOR -------------------
 def login_required(f):
@@ -219,60 +149,6 @@ def logout():
     session.clear()
     return redirect("/login")
 
-# ------------------- EMAIL CONFIGURATION -------------------
-# Email settings - configure these for your email provider
-SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
-SMTP_PORT = int(os.environ.get('SMTP_PORT', 587))
-SMTP_USERNAME = 'victorshittu17@gmail.com'
-SMTP_PASSWORD = 'nqdm uocv gtds qbro'
-FROM_EMAIL = 'victorshittu17@gmail.com'
-
-def send_password_reset_email(email, reset_token):
-    """
-    Send password reset email with the reset link.
-    """
-    try:
-        # Create message
-        msg = MIMEMultipart()
-        msg['From'] = FROM_EMAIL
-        msg['To'] = email
-        msg['Subject'] = 'Password Reset - Malaria Detection System'
-        
-        # Get base URL from request
-        base_url = request.host_url.rstrip('/')
-        reset_link = f"{base_url}/reset_password?token={reset_token}&email={email}"
-        
-        # Email body
-        body = f"""
-        Hello,
-        
-        You requested a password reset for your Malaria Detection System account.
-        
-        Click the link below to reset your password:
-        {reset_link}
-        
-        This link will expire in 1 hour.
-        
-        If you didn't request this, please ignore this email.
-        
-        Best regards,
-        Malaria Detection System
-        """
-        
-        msg.attach(MIMEText(body, 'plain'))
-        
-        # Connect to SMTP server and send
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
-        server.sendmail(FROM_EMAIL, email, msg.as_string())
-        server.quit()
-        
-        return True, "Email sent successfully!"
-    except Exception as e:
-        print(f"Error sending email: {e}")
-        return False, str(e)
-
 # ------------------- FORGOT PASSWORD ROUTES -------------------
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
@@ -284,13 +160,11 @@ def forgot_password():
         db.close()
         
         if user:
-            # Generate a reset token
             reset_token = secrets.token_urlsafe(32)
             session["reset_email"] = email
             session["reset_token"] = reset_token
             
-            # Always use demo mode on Render (email sending often fails on cloud platforms)
-            # The reset token is shown directly on the page for password reset
+            # Demo mode - show reset link directly
             return render_template("auth/reset_password.html", 
                                    email=email, 
                                    token=reset_token,
@@ -320,13 +194,11 @@ def reset_password():
         db.commit()
         db.close()
         
-        # Clear reset session
         session.pop("reset_email", None)
         session.pop("reset_token", None)
         
         return redirect("/login")
     
-    # GET request - show password reset form
     email = request.args.get("email", "")
     token = request.args.get("token", "")
     
@@ -340,21 +212,14 @@ def reset_password():
 
 # ------------------- DASHBOARD -------------------
 def calculate_model_metrics():
-    """
-    Calculate real model evaluation metrics from predictions.
-    Uses the stored predictions in the database to compute metrics.
-    Returns dict with accuracy, precision, recall, f1_score.
-    """
     try:
         db = get_db()
         predictions = db.execute("SELECT result, malaria_score FROM predictions").fetchall()
         db.close()
         
         if len(predictions) < 2:
-            # Not enough predictions to calculate meaningful metrics
             return None
         
-        # Calculate metrics from actual predictions
         true_positive = 0
         false_positive = 0
         true_negative = 0
@@ -364,16 +229,11 @@ def calculate_model_metrics():
             result = pred["result"]
             malaria_score = pred["malaria_score"]
             
-            # Assuming malaria_score > 50 means positive (Malaria Detected)
-            # This is a simplified calculation - in reality you'd need ground truth
-            # For now, use the model's own confidence as pseudo-ground truth
             if malaria_score is None:
                 continue
                 
             predicted_positive = malaria_score > 50
             
-            # For demonstration, use the prediction itself as ground truth
-            # This gives us the model's self-consistency metrics
             if result == "Malaria Detected" and predicted_positive:
                 true_positive += 1
             elif result != "Malaria Detected" and predicted_positive:
@@ -387,7 +247,6 @@ def calculate_model_metrics():
         if total < 2:
             return None
             
-        # Calculate metrics
         accuracy = (true_positive + true_negative) / total * 100 if total > 0 else 0
         precision = true_positive / (true_positive + false_positive) * 100 if (true_positive + false_positive) > 0 else 0
         recall = true_positive / (true_positive + false_negative) * 100 if (true_positive + false_negative) > 0 else 0
@@ -409,9 +268,6 @@ def dashboard():
     db = get_db()
     total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
     total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
-    
-    # High-risk: patients with malaria_score > 50% (using the actual score from the model)
-    # Use COALESCE to handle NULL values from older predictions
     high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
     low_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) <= 50").fetchone()[0]
     
@@ -420,14 +276,11 @@ def dashboard():
         "FROM predictions pr JOIN patients p ON pr.patient_id=p.id "
         "ORDER BY pr.created_at DESC LIMIT 5"
     ).fetchall()
-    # Convert Row objects to tuples for template index access
     recent_predictions = [tuple(row) for row in recent_predictions_raw]
     db.close()
     
-    # Calculate real-time model metrics from predictions
     metrics = calculate_model_metrics()
     
-    # If we don't have enough predictions, use default model performance
     if metrics is None:
         metrics = {
             "accuracy": 96.5,
@@ -482,6 +335,7 @@ def view_patient(id):
 # ------------------- PREDICTION ROUTE -------------------
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
 @app.route("/predict", methods=["GET", "POST"])
 @login_required
 def predict():
@@ -492,18 +346,13 @@ def predict():
         file = request.files["file"]
 
         if file and allowed_file(file.filename):
-            # Save uploaded image with unique filename using timestamp
             timestamp = int(time.time() * 1000)
             ext = file.filename.rsplit(".", 1)[1].lower()
             filename = f"cell_{timestamp}_{patient_id}.{ext}"
             file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(file_path)
 
-            # Get the absolute path - the malaria_model directory
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            
-            # For local development, try the relative path first
-            # For Render deployment, check if malaria_model is in the app directory
             local_model_dir = os.path.join(base_dir, "malaria_model")
             parent_model_dir = os.path.join(base_dir, "..", "..", "malaria_model")
             
@@ -512,19 +361,17 @@ def predict():
             elif os.path.exists(parent_model_dir):
                 model_dir = parent_model_dir
             else:
-                return "Error: malaria_model directory not found. Please ensure the model is included in your deployment."
+                return "Error: malaria_model directory not found."
             
             predict_script = os.path.join(model_dir, "malaria_predict.py")
             model_path = os.path.join(model_dir, "malaria_cnn_model.keras")
             
-            # Call malaria_predict.py with both image and model paths
             try:
                 output = subprocess.check_output(
                     ["python", predict_script, file_path, model_path],
                     cwd=base_dir
                 )
                 output = output.decode("utf-8").strip()
-                # Split all values: label|probability|malaria_score|no_malaria_score
                 parts = output.split("|")
                 result = parts[0]
                 probability = float(parts[1])
@@ -533,7 +380,6 @@ def predict():
             except Exception as e:
                 return f"Error running prediction: {e}"
 
-            # Save prediction to DB with both scores
             db.execute(
                 "INSERT INTO predictions (patient_id, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?)",
                 (patient_id, result, probability, malaria_score, no_malaria_score)
@@ -550,7 +396,6 @@ def predict():
                 no_malaria_score=no_malaria_score
             )
 
-    # GET method: show form
     patients = db.execute("SELECT * FROM patients").fetchall()
     db.close()
     return render_template("auth/predict.html", patients=patients)
@@ -560,11 +405,8 @@ def predict():
 @login_required
 def list_staff():
     db = get_db()
-    
-    # Get department filter from query params
     department_filter = request.args.get("dept")
     
-    # Base query
     if department_filter:
         staff_members = db.execute(
             "SELECT * FROM staff WHERE department=? ORDER BY created_at DESC", 
@@ -573,7 +415,6 @@ def list_staff():
     else:
         staff_members = db.execute("SELECT * FROM staff ORDER BY created_at DESC").fetchall()
     
-    # Get department counts
     department_counts = {}
     counts = db.execute("SELECT department, COUNT(*) as count FROM staff GROUP BY department").fetchall()
     for row in counts:
@@ -628,15 +469,12 @@ def list_users():
 @app.route("/users/<int:id>/delete")
 @login_required
 def delete_user(id):
-    # Prevent user from deleting themselves
     if session.get("user") == id:
         return "You cannot delete your own account!"
     
     db = get_db()
-    # First delete all predictions associated with patients owned by this user
     db.execute("DELETE FROM predictions WHERE patient_id IN (SELECT id FROM patients WHERE user_id=?)", (id,))
     db.execute("DELETE FROM patients WHERE user_id=?", (id,))
-    # Then delete the user
     db.execute("DELETE FROM users WHERE id=?", (id,))
     db.commit()
     db.close()
