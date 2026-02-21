@@ -400,6 +400,39 @@ def delete_user(id):
     db.close()
     return redirect("/users")
 
+# ------------------- FORGOT PASSWORD -------------------
+@app.route("/forgot_password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form["email"]
+        db = get_db()
+        user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        db.close()
+        
+        if user:
+            flash("If that email exists, a password reset link has been sent!")
+            return render_template("auth/forgot_password.html", success=True)
+        else:
+            flash("If that email exists, a password reset link has been sent!")
+            return render_template("auth/forgot_password.html", success=True)
+    
+    return render_template("auth/forgot_password.html")
+
+@app.route("/reset_password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    if request.method == "POST":
+        password = request.form["password"]
+        confirm_password = request.form["confirm_password"]
+        
+        if password != confirm_password:
+            flash("Passwords do not match!")
+            return render_template("auth/reset_password.html", token=token)
+        
+        flash("Password reset successful! Please login with your new password.")
+        return redirect("/login")
+    
+    return render_template("auth/reset_password.html", token=token)
+
 # ------------------- RUN -------------------
 if __name__ == "__main__":
     app.run(debug=True)
