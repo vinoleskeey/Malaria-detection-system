@@ -92,11 +92,27 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-# ------------------- DB CONNECTION -------------------
+# ------------------- DATABASE CONFIGURATION -------------------
 def get_db():
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+    """
+    Get database connection.
+    Uses PostgreSQL on Render (detected via DATABASE_URL env var),
+    otherwise falls back to SQLite for local development.
+    """
+    database_url = os.environ.get('DATABASE_URL')
+    
+    if database_url:
+        # Use PostgreSQL on Render
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        conn = psycopg2.connect(database_url)
+        conn.row_factory = RealDictCursor
+        return conn
+    else:
+        # Use SQLite for local development
+        conn = sqlite3.connect("database.db")
+        conn.row_factory = sqlite3.Row
+        return conn
 
 # ------------------- LOGIN REQUIRED DECORATOR -------------------
 def login_required(f):
