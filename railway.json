@@ -3,11 +3,29 @@
   "build": {
     "builder": "NIXPACKS",
     "buildCommand": "pip install -r requirements.txt",
-    "installCommand": "pip install -r requirements.txt"
+    "startCommand": "gunicorn app:app --workers 1 --timeout 300"
   },
   "deploy": {
     "numReplicas": 1,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
+  },
+  "env": {
+    "SECRET_KEY": {
+      "description": "Flask secret key for sessions",
+      "generateValue": true
+    },
+    "DEVELOPER_EMAIL": {
+      "description": "Your email address - only this email can access staff features",
+      "value": "your_email@example.com"
+    },
+    "MAIL_USERNAME": {
+      "description": "Your Gmail address for password reset emails",
+      "value": ""
+    },
+    "MAIL_PASSWORD": {
+      "description": "Your Gmail app password for password reset emails",
+      "value": ""
+    }
   }
 }
