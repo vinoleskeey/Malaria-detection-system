@@ -668,8 +668,48 @@
                 </a>
             </li>
             
-            {% if session.get("role") == "staff" or session.get("role") == "admin" %}
-            <!-- Staff/Admin: Full Access -->
+            {% if session.get("email") == "your_email@example.com" %}
+            <!-- Developer Only: Full Access with Staff Management -->
+            
+            <!-- Patients Dropdown -->
+            <li class="nav-item dropdown">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-users"></i> Patients
+                    <span class="arrow">▸</span>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="/patients"><i class="fas fa-list"></i> View All Patients</a></li>
+                    <li><a href="/patients/add"><i class="fas fa-user-plus"></i> Add New Patient</a></li>
+                </ul>
+            </li>
+            
+            <!-- Developer Tools Dropdown -->
+            <li class="nav-item dropdown">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-cogs"></i> Developer Tools
+                    <span class="arrow">▸</span>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="/dev/staff-list"><i class="fas fa-user-md"></i> Manage Staff</a></li>
+                    <li><a href="/dev/create-staff"><i class="fas fa-user-plus"></i> Create Staff</a></li>
+                    <li><a href="/users"><i class="fas fa-users"></i> Manage Users</a></li>
+                </ul>
+            </li>
+            
+            <!-- Predictions Dropdown -->
+            <li class="nav-item dropdown">
+                <a href="#" class="nav-link">
+                    <i class="fas fa-microscope"></i> Predictions
+                    <span class="arrow">▸</span>
+                </a>
+                <ul class="dropdown-menu">
+                    <li><a href="/predict"><i class="fas fa-play"></i> Run Prediction</a></li>
+                    <li><a href="/dashboard"><i class="fas fa-chart-bar"></i> View Results</a></li>
+                </ul>
+            </li>
+            
+            {% elif session.get("role") == "staff" or session.get("role") == "admin" %}
+            <!-- Staff/Admin: Limited Access -->
             
             <!-- Patients Dropdown -->
             <li class="nav-item dropdown">

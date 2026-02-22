@@ -7,10 +7,28 @@ import os
 import time
 import secrets
 import numpy as np
+import re
+import hmac
 
 # ------------------- APP SETUP -------------------
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+# Security configurations
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+# Email configuration (for password reset)
+app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+
+# Developer email - only this email can access staff features
+DEVELOPER_EMAIL = os.environ.get('DEVELOPER_EMAIL', 'your_email@example.com')
 
 # ------------------- AUTO DATABASE INITIALIZATION -------------------
 def init_db():
@@ -28,7 +46,20 @@ def init_db():
         role TEXT NOT NULL DEFAULT 'patient',
         phone TEXT,
         address TEXT,
+        is_verified INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    
+    # Create password reset tokens table
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS password_resets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token TEXT NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
     
@@ -53,6 +84,7 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'patient'")
         c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         c.execute("ALTER TABLE users ADD COLUMN address TEXT")
+        c.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0")
     
     try:
         c.execute("SELECT user_id FROM patients LIMIT 1")
@@ -104,7 +136,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 def preload_model():
     """Preload model at startup"""
     global model
-    # Use relative path - malaria_model folder is in the project directory
     model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
     model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
     
@@ -154,12 +185,40 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+# ------------------- SECURITY HELPERS -------------------
+def is_developer():
+    """Check if current user is the developer"""
+    return session.get('email') == DEVELOPER_EMAIL
+
+def sanitize_input(input_string):
+    """Basic input sanitization to prevent XSS"""
+    if not input_string:
+        return ""
+    # Remove potentially dangerous characters
+    return re.sub(r'[<>"\']', '', str(input_string))
+
+def validate_email(email):
+    """Validate email format"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
 # ------------------- ROLE-BASED ACCESS DECORATORS -------------------
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if "user" not in session:
             return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated_function
+
+def developer_required(f):
+    """Only the developer (you) can access these routes"""
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        if not is_developer():
+            flash("Access denied. Developer only.", "error")
+            return redirect("/dashboard")
         return f(*args, **kwargs)
     return decorated_function
 
@@ -173,28 +232,30 @@ def staff_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-def patient_only(f):
-    @wraps(f)
-    @login_required
-    def decorated_function(*args, **kwargs):
-        if session.get("role") == "staff" or session.get("role") == "admin":
-            return f(*args, **kwargs)  # Staff can also access
-        return f(*args, **kwargs)
-    return decorated_function
-
 # ------------------- AUTH ROUTES -------------------
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        name = request.form["name"]
-        email = request.form["email"]
-        password = generate_password_hash(request.form["password"])
-        role = request.form.get("role", "patient")  # Default to patient
+        name = sanitize_input(request.form["name"])
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        
+        # Validate email format
+        if not validate_email(email):
+            flash("Invalid email format!", "error")
+            return render_template("auth/register.html")
+        
+        # Validate password strength
+        if len(password) < 8:
+            flash("Password must be at least 8 characters!", "error")
+            return render_template("auth/register.html")
+        
+        password_hash = generate_password_hash(password)
         
         db = get_db()
         try:
             db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                       (name, email, password, role))
+                       (name, email, password_hash, "patient"))
             db.commit()
             db.close()
             flash("Registration successful! Please login.", "success")
@@ -208,22 +269,30 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form["email"]
+        email = request.form["email"].lower().strip()
         password = request.form["password"]
+        
         db = get_db()
-        user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
-        db.close()
+        user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        
+        # Check if user exists and password is correct
         if user and check_password_hash(user["password"], password):
+            # Regenerate session to prevent session fixation
+            session.clear()
             session["user"] = user["id"]
             session["user_name"] = user["name"]
+            session["email"] = user["email"]
             session["role"] = user["role"]
             
-            # Redirect based on role
-            if user["role"] == "staff" or user["role"] == "admin":
+            db.close()
+            
+            # Redirect based on role and if developer
+            if is_developer() or user["role"] == "admin":
                 return redirect("/dashboard")
             else:
                 return redirect("/dashboard")
         else:
+            db.close()
             flash("Invalid email or password!", "error")
             return render_template("auth/login.html")
     return render_template("auth/login.html")
@@ -241,9 +310,9 @@ def profile():
     user_id = session.get("user")
     
     if request.method == "POST":
-        name = request.form["name"]
-        phone = request.form.get("phone", "")
-        address = request.form.get("address", "")
+        name = sanitize_input(request.form["name"])
+        phone = sanitize_input(request.form.get("phone", ""))
+        address = sanitize_input(request.form.get("address", ""))
         
         # Update user profile
         db.execute("UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?",
@@ -270,8 +339,8 @@ def dashboard():
     user_id = session.get("user")
     role = session.get("role")
     
-    if role == "staff" or role == "admin":
-        # Staff/Admin see all data
+    if role == "staff" or role == "admin" or is_developer():
+        # Staff/Admin/Developer see all data
         total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
         total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
         high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
@@ -325,8 +394,8 @@ def list_patients():
     user_id = session.get("user")
     role = session.get("role")
     
-    if role == "staff" or role == "admin":
-        # Staff/Admin see all patients
+    if role == "staff" or role == "admin" or is_developer():
+        # Staff/Admin/Developer see all patients
         patients = db.execute("SELECT * FROM patients").fetchall()
     else:
         # Patients only see their own records
@@ -342,11 +411,11 @@ def add_patient():
     user_id = session.get("user")
     
     if request.method == "POST":
-        name = request.form["name"]
+        name = sanitize_input(request.form["name"])
         age = request.form["age"]
         gender = request.form["gender"]
-        phone = request.form.get("phone", "")
-        address = request.form.get("address", "")
+        phone = sanitize_input(request.form.get("phone", ""))
+        address = sanitize_input(request.form.get("address", ""))
         
         # Get selected user (patient) if staff is adding on behalf
         patient_user_id = request.form.get("patient_user_id")
@@ -383,7 +452,7 @@ def view_patient(id):
     patient = db.execute("SELECT * FROM patients WHERE id = ?", (id,)).fetchone()
     
     # Check access
-    if role != "staff" and role != "admin" and patient["user_id"] != user_id:
+    if role != "staff" and role != "admin" and not is_developer() and patient["user_id"] != user_id:
         db.close()
         flash("Access denied. You can only view your own records.", "error")
         return redirect("/patients")
@@ -413,14 +482,8 @@ def predict():
             file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(file_path)
 
-            # Use relative path - malaria_model folder is in the project directory
             model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
             model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
-            
-            print(f"[DEBUG] Model directory: {model_dir}")
-            print(f"[DEBUG] Model file: {model_file}")
-            print(f"[DEBUG] Model dir exists: {os.path.exists(model_dir)}")
-            print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
             
             if not os.path.exists(model_dir):
                 return "Error: malaria_model directory not found."
@@ -430,17 +493,13 @@ def predict():
                 return f"Error: Uploaded file not found at {file_path}"
             
             try:
-                # Try to use preloaded model first
                 tf_model = load_model()
                 
                 if tf_model is None:
-                    # If preload failed, try loading directly
                     import tensorflow as tf
                     tf.config.threading.set_intra_op_parallelism_threads(1)
                     tf.config.threading.set_inter_op_parallelism_threads(1)
-                    print(f"[DEBUG] Loading model directly from: {model_file}")
                     tf_model = tf.keras.models.load_model(model_file)
-                    print("[DEBUG] Model loaded successfully!")
                 
                 from tensorflow.keras.preprocessing import image
                 img = image.load_img(file_path, target_size=(128, 128))
@@ -458,8 +517,6 @@ def predict():
                 else:
                     result = "No Malaria"
                     probability = no_malaria_score
-                
-                print(f"Prediction: {result}, Probability: {probability}")
                 
             except Exception as e:
                 print(f"Prediction error: {str(e)}")
@@ -498,8 +555,8 @@ def my_results():
     user_id = session.get("user")
     role = session.get("role")
     
-    if role == "staff" or role == "admin":
-        # Staff can see all predictions too
+    if role == "staff" or role == "admin" or is_developer():
+        # Staff/Admin/Developer can see all predictions
         predictions = db.execute("""
             SELECT pr.*, p.name as patient_name, p.age, p.gender, u.name as staff_name
             FROM predictions pr
@@ -521,9 +578,9 @@ def my_results():
     db.close()
     return render_template("auth/my_results.html", predictions=predictions)
 
-# ------------------- STAFF -------------------
+# ------------------- STAFF (Developer Only) -------------------
 @app.route("/staff")
-@staff_required
+@developer_required
 def list_staff():
     db = get_db()
     staff_members = db.execute("SELECT * FROM staff ORDER BY created_at DESC").fetchall()
@@ -535,14 +592,14 @@ def list_staff():
     return render_template("staff/list_staff.html", staff_members=staff_members, department_counts=department_counts)
 
 @app.route("/staff/add", methods=["GET", "POST"])
-@staff_required
+@developer_required
 def add_staff():
     if request.method == "POST":
-        name = request.form["name"]
-        email = request.form["email"]
-        phone = request.form["phone"]
-        role = request.form["role"]
-        department = request.form["department"]
+        name = sanitize_input(request.form["name"])
+        email = request.form["email"].lower().strip()
+        phone = sanitize_input(request.form["phone"])
+        role = sanitize_input(request.form["role"])
+        department = sanitize_input(request.form["department"])
         db = get_db()
         try:
             db.execute("INSERT INTO staff (name, email, phone, role, department) VALUES (?, ?, ?, ?, ?)",
@@ -556,7 +613,7 @@ def add_staff():
     return render_template("staff/add_staff.html")
 
 @app.route("/staff/<int:id>/delete")
-@staff_required
+@developer_required
 def delete_staff(id):
     db = get_db()
     db.execute("DELETE FROM staff WHERE id = ?", (id,))
@@ -564,9 +621,9 @@ def delete_staff(id):
     db.close()
     return redirect("/staff")
 
-# ------------------- USERS -------------------
+# ------------------- USERS (Developer/Admin Only) -------------------
 @app.route("/users")
-@staff_required
+@developer_required
 def list_users():
     db = get_db()
     users = db.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC").fetchall()
@@ -574,7 +631,7 @@ def list_users():
     return render_template("auth/list_users.html", users=users)
 
 @app.route("/users/<int:id>/delete")
-@staff_required
+@developer_required
 def delete_user(id):
     if session.get("user") == id:
         return "You cannot delete your own account!"
@@ -586,26 +643,149 @@ def delete_user(id):
     db.close()
     return redirect("/users")
 
-# ------------------- FORGOT PASSWORD -------------------
+# ------------------- DEVELOPER STAFF MANAGEMENT -------------------
+@app.route("/dev/create-staff", methods=["GET", "POST"])
+@developer_required
+def dev_create_staff():
+    """Developer-only route to create staff members"""
+    if request.method == "POST":
+        name = sanitize_input(request.form["name"])
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        
+        if not validate_email(email):
+            flash("Invalid email format!", "error")
+            return render_template("auth/dev_create_staff.html")
+        
+        password_hash = generate_password_hash(password)
+        
+        db = get_db()
+        try:
+            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+                       (name, email, password_hash, "staff"))
+            db.commit()
+            flash(f"Staff member {name} created successfully!", "success")
+            db.close()
+            return redirect("/dev/staff-list")
+        except sqlite3.IntegrityError:
+            db.close()
+            flash("Email already exists!", "error")
+    
+    return render_template("auth/dev_create_staff.html")
+
+@app.route("/dev/staff-list")
+@developer_required
+def dev_staff_list():
+    """Developer-only route to list staff"""
+    db = get_db()
+    staff_members = db.execute("SELECT id, name, email, role, created_at FROM users WHERE role = 'staff' ORDER BY created_at DESC").fetchall()
+    db.close()
+    return render_template("auth/dev_staff_list.html", staff_members=staff_members)
+
+@app.route("/dev/staff/<int:id>/delete")
+@developer_required
+def dev_delete_staff(id):
+    """Developer-only route to delete staff"""
+    db = get_db()
+    db.execute("DELETE FROM users WHERE id = ? AND role = 'staff'", (id,))
+    db.commit()
+    db.close()
+    flash("Staff member deleted.", "success")
+    return redirect("/dev/staff-list")
+
+# ------------------- EMAIL PASSWORD RESET -------------------
+def send_password_reset_email(email, token):
+    """Send password reset email"""
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        mail_username = app.config['MAIL_USERNAME']
+        mail_password = app.config['MAIL_PASSWORD']
+        
+        if not mail_username or not mail_password:
+            print("Email not configured. Token:", token[:10] + "...")
+            return False
+        
+        msg = MIMEMultipart()
+        msg['From'] = mail_username
+        msg['To'] = email
+        msg['Subject'] = 'Password Reset - Malaria Detection System'
+        
+        reset_url = f"https://your-app-name.up.railway.app/reset_password/{token}"
+        
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #00796b;">Password Reset Request</h2>
+            <p>You requested a password reset for your Malaria Detection System account.</p>
+            <p>Click the button below to reset your password:</p>
+            <a href="{reset_url}" style="background-color: #00796b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">Reset Password</a>
+            <p>Or copy and paste this link: {reset_url}</p>
+            <p><strong>This link expires in 1 hour.</strong></p>
+            <p>If you didn't request this, please ignore this email.</p>
+            <hr>
+            <p style="color: #666; font-size: 12px;">Malaria Detection System</p>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        server = smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT'])
+        server.starttls()
+        server.login(mail_username, mail_password)
+        server.send_message(msg)
+        server.quit()
+        
+        return True
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
+
 @app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
-        email = request.form["email"]
+        email = request.form["email"].lower().strip()
+        
         db = get_db()
         user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        db.close()
         
         if user:
-            flash("If that email exists, a password reset link has been sent!", "success")
-            return render_template("auth/forgot_password.html", success=True)
-        else:
-            flash("If that email exists, a password reset link has been sent!", "success")
-            return render_template("auth/forgot_password.html", success=True)
+            # Generate secure token
+            token = secrets.token_urlsafe(32)
+            expires_at = time.time() + 3600  # 1 hour expiry
+            
+            # Store token in database
+            db.execute("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)",
+                       (user["id"], token, expires_at))
+            db.commit()
+            
+            # Send email
+            send_password_reset_email(email, token)
+        
+        # Always show same message to prevent email enumeration
+        flash("If that email exists, a password reset link has been sent!", "success")
+        return render_template("auth/forgot_password.html", success=True)
     
     return render_template("auth/forgot_password.html")
 
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
 def reset_password(token):
+    db = get_db()
+    
+    # Find valid token
+    reset_record = db.execute(
+        "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > ?",
+        (token, time.time())
+    ).fetchone()
+    
+    if not reset_record:
+        db.close()
+        flash("Invalid or expired reset token!", "error")
+        return redirect("/forgot_password")
+    
     if request.method == "POST":
         password = request.form["password"]
         confirm_password = request.form["confirm_password"]
@@ -614,9 +794,24 @@ def reset_password(token):
             flash("Passwords do not match!", "error")
             return render_template("auth/reset_password.html", token=token)
         
+        if len(password) < 8:
+            flash("Password must be at least 8 characters!", "error")
+            return render_template("auth/reset_password.html", token=token)
+        
+        # Update password
+        password_hash = generate_password_hash(password)
+        db.execute("UPDATE users SET password = ? WHERE id = ?", 
+                   (password_hash, reset_record["user_id"]))
+        
+        # Mark token as used
+        db.execute("UPDATE password_resets SET used = 1 WHERE id = ?", (reset_record["id"],))
+        db.commit()
+        db.close()
+        
         flash("Password reset successful! Please login with your new password.", "success")
         return redirect("/login")
     
+    db.close()
     return render_template("auth/reset_password.html", token=token)
 
 # ------------------- RUN -------------------

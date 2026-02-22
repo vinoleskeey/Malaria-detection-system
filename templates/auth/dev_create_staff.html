@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block header %}Create Staff Member{% endblock %}
+{% block content %}
+
+<div class="login-container" style="max-width: 500px;">
+    <div class="login-card">
+        <h2><i class="fas fa-user-md" style="color: #00796b;"></i> Create Staff Member</h2>
+        <p style="color: #666; margin-bottom: 20px;">Only the developer can create staff accounts.</p>
+
+        <form method="post">
+            <input type="text" name="name" placeholder="Full Name" required style="background: #f8f9fa;">
+            <input type="email" name="email" placeholder="Email Address" required style="background: #f8f9fa;">
+            <input type="password" name="password" placeholder="Password (min 8 characters)" required minlength="8" style="background: #f8f9fa;">
+            <button type="submit"><i class="fas fa-user-plus"></i> Create Staff</button>
+        </form>
+
+        <p>
+            <a href="/dev/staff-list"><i class="fas fa-list"></i> View All Staff</a>
+        </p>
+    </div>
+</div>
+
+{% endblock %}

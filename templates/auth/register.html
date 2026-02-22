@@ -9,10 +9,8 @@
             <input type="text" name="name" placeholder="Full Name" required style="background: #f8f9fa;">
             <input type="email" name="email" placeholder="Email Address" required style="background: #f8f9fa;">
             <div class="form-group">
-                <select name="role" required style="background: #f8f9fa; width: 100%; padding: 14px 18px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 15px; font-family: 'Poppins', sans-serif;">
-                    <option value="patient">Patient</option>
-                    <option value="staff">Hospital Staff</option>
-                </select>
+                <input type="hidden" name="role" value="patient">
+                <p style="color: #666; font-size: 14px;"><i class="fas fa-info-circle"></i> Register as a patient to receive malaria test results from hospital staff.</p>
             </div>
             <div class="password-field">
                 <input type="password" name="password" id="password" placeholder="Password" required minlength="6" style="background: #f8f9fa;">
