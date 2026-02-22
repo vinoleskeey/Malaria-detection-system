@@ -771,6 +771,46 @@ def forgot_password():
     
     return render_template("auth/forgot_password.html")
 
+# ------------------- DEVELOPER SETUP ROUTE -------------------
+@app.route("/dev/setup", methods=["GET", "POST"])
+def dev_setup():
+    """Initial setup route to create the developer account"""
+    db = get_db()
+    
+    # Check if developer already exists
+    developer = db.execute("SELECT * FROM users WHERE email = ?", (DEVELOPER_EMAIL,)).fetchone()
+    
+    if developer:
+        db.close()
+        if request.method == "POST":
+            flash("Developer account already exists. Please login.", "info")
+            return redirect("/login")
+        return render_template("auth/dev_setup.html", exists=True)
+    
+    # No developer exists, allow creation
+    if request.method == "POST":
+        name = sanitize_input(request.form["name"])
+        password = request.form["password"]
+        
+        if len(password) < 8:
+            flash("Password must be at least 8 characters!", "error")
+            return render_template("auth/dev_setup.html", exists=False)
+        
+        password_hash = generate_password_hash(password)
+        
+        try:
+            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+                       (name, DEVELOPER_EMAIL, password_hash, "admin"))
+            db.commit()
+            flash("Developer account created! Please login.", "success")
+            db.close()
+            return redirect("/login")
+        except sqlite3.IntegrityError:
+            flash("Error creating account!", "error")
+    
+    db.close()
+    return render_template("auth/dev_setup.html", exists=False)
+
 @app.route("/reset_password/<token>", methods=["GET", "POST"])
 def reset_password(token):
     db = get_db()
