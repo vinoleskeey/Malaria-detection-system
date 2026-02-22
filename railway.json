@@ -17,15 +17,15 @@
     },
     "DEVELOPER_EMAIL": {
       "description": "Your email address - only this email can access staff features",
-      "value": "your_email@example.com"
+      "value": "victorshittu17@gmail.com"
     },
     "MAIL_USERNAME": {
       "description": "Your Gmail address for password reset emails",
-      "value": ""
+      "value": "victorshittu17@gmail.com"
     },
     "MAIL_PASSWORD": {
       "description": "Your Gmail app password for password reset emails",
-      "value": ""
+      "value": "ifyg knbp oxbv izpk"
     }
   }
 }
