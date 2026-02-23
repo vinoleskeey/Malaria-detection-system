@@ -128,12 +128,19 @@ def init_db():
     conn.close()
     print("Database initialized!")
 
-# Create default developer account if not exists
+init_db()
+
+# ------------------- DB CONNECTION -------------------
+def get_db():
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# Create default developer account after get_db is defined
 def create_default_developer():
     db = get_db()
     developer = db.execute("SELECT * FROM users WHERE email = ?", (DEVELOPER_EMAIL,)).fetchone()
     if not developer:
-        # Create default admin account with password "admin123"
         password_hash = generate_password_hash("admin123")
         try:
             db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
@@ -144,7 +151,6 @@ def create_default_developer():
             pass
     db.close()
 
-init_db()
 create_default_developer()
 
 # ------------------- LOAD TENSORFLOW MODEL -------------------
@@ -199,11 +205,6 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-# ------------------- DB CONNECTION -------------------
-def get_db():
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
 
 # ------------------- SECURITY HELPERS -------------------
 def is_developer():
