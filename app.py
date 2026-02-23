@@ -287,23 +287,132 @@ def login():
             session["email"] = user["email"]
             session["role"] = user["role"]
             
-            db.close()
+            # If developer/admin, also store in switchable accounts
+            if is_developer() or user["role"] in ["admin", "staff"]:
+                # Get all admin/staff accounts for switching
+                switchable_accounts = db.execute(
+                    "SELECT id, name, email, role FROM users WHERE role IN ('admin', 'staff') OR email = ?",
+                    (DEVELOPER_EMAIL,)
+                ).fetchall()
+                session["switchable_accounts"] = [dict(row) for row in switchable_accounts]
             
-            # Redirect based on role and if developer
-            if is_developer() or user["role"] == "admin":
-                return redirect("/dashboard")
-            else:
-                return redirect("/dashboard")
+            db.close()
+            return redirect("/dashboard")
         else:
             db.close()
             flash("Invalid email or password!", "error")
             return render_template("auth/login.html")
-    return render_template("auth/login.html")
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/login")
+
+# ------------------- ACCOUNT SWITCHING -------------------
+@app.route("/switch-account", methods=["POST"])
+@login_required
+def switch_account():
+    """Switch to another account"""
+    target_user_id = request.form.get("user_id")
+    
+    if not target_user_id:
+        flash("Invalid account selection", "error")
+        return redirect("/dashboard")
+    
+    db = get_db()
+    target_user = db.execute("SELECT * FROM users WHERE id = ?", (target_user_id,)).fetchone()
+    
+    if not target_user:
+        db.close()
+        flash("Account not found", "error")
+        return redirect("/dashboard")
+    
+    # Store current user info before switching (for switching back)
+    current_user_id = session.get("user")
+    if session.get("role") in ["admin", "staff"] or is_developer():
+        # Store current account in previous accounts for easy switch back
+        if "previous_accounts" not in session:
+            session["previous_accounts"] = []
+        
+        # Add current to previous (if not already there)
+        prev_accounts = session.get("previous_accounts", [])
+        if current_user_id not in [a.get("id") for a in prev_accounts]:
+            prev_accounts.append({
+                "id": session.get("user"),
+                "name": session.get("user_name"),
+                "email": session.get("email"),
+                "role": session.get("role")
+            })
+            session["previous_accounts"] = prev_accounts[-5:]  # Keep last 5
+    
+    # Switch to new account
+    session["user"] = target_user["id"]
+    session["user_name"] = target_user["name"]
+    session["email"] = target_user["email"]
+    session["role"] = target_user["role"]
+    
+    # Refresh switchable accounts if admin/staff
+    if is_developer() or target_user["role"] in ["admin", "staff"]:
+        switchable_accounts = db.execute(
+            "SELECT id, name, email, role FROM users WHERE role IN ('admin', 'staff') OR email = ?",
+            (DEVELOPER_EMAIL,)
+        ).fetchall()
+        session["switchable_accounts"] = [dict(row) for row in switchable_accounts]
+    else:
+        session.pop("switchable_accounts", None)
+    
+    db.close()
+    
+    flash(f"Switched to {target_user['name']}", "success")
+    return redirect("/dashboard")
+
+@app.route("/switch-back")
+@login_required
+def switch_back():
+    """Switch back to previous account"""
+    previous_accounts = session.get("previous_accounts", [])
+    
+    if not previous_accounts:
+        flash("No account to switch back to", "error")
+        return redirect("/dashboard")
+    
+    # Get the most recent previous account
+    prev = previous_accounts[-1]
+    
+    # Current becomes previous
+    current_prev = {
+        "id": session.get("user"),
+        "name": session.get("user_name"),
+        "email": session.get("email"),
+        "role": session.get("role")
+    }
+    
+    # Switch to previous
+    session["user"] = prev["id"]
+    session["user_name"] = prev["name"]
+    session["email"] = prev["email"]
+    session["role"] = prev["role"]
+    
+    # Update previous accounts list
+    new_prev = previous_accounts[:-1]
+    if current_prev.get("role") in ["admin", "staff"] or current_prev.get("email") == DEVELOPER_EMAIL:
+        new_prev.append(current_prev)
+    session["previous_accounts"] = new_prev
+    
+    # Refresh switchable accounts
+    db = get_db()
+    if is_developer() or prev["role"] in ["admin", "staff"]:
+        switchable_accounts = db.execute(
+            "SELECT id, name, email, role FROM users WHERE role IN ('admin', 'staff') OR email = ?",
+            (DEVELOPER_EMAIL,)
+        ).fetchall()
+        session["switchable_accounts"] = [dict(row) for row in switchable_accounts]
+    else:
+        session.pop("switchable_accounts", None)
+    db.close()
+    
+    flash(f"Switched back to {prev['name']}", "success")
+    return redirect("/dashboard")
 
 # ------------------- PROFILE ROUTE -------------------
 @app.route("/profile", methods=["GET", "POST"])
