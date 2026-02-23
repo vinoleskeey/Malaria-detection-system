@@ -3,28 +3,32 @@
 {% block content %}
 
 <!-- Account Switcher for Admin/Staff -->
-{% if session.get('switchable_accounts') and session.get('switchable_accounts')|length > 1 %}
+{% if session.get('role') in ['admin', 'staff'] or session.get('email') == 'victorshittu17@gmail.com' %}
 <div style="background: linear-gradient(135deg, #00796b 0%, #004d40 100%); padding: 20px; border-radius: 12px; margin-bottom: 25px; color: white;">
     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
         <div style="display: flex; align-items: center; gap: 15px;">
             <i class="fas fa-exchange-alt" style="font-size: 24px;"></i>
             <div>
-                <h4 style="margin: 0; font-size: 16px;">Quick Account Switch</h4>
-                <p style="margin: 5px 0 0; font-size: 13px; opacity: 0.9;">Switch between admin and staff accounts instantly</p>
+                <h4 style="margin: 0; font-size: 16px;">Account Switcher</h4>
+                <p style="margin: 5px 0 0; font-size: 13px; opacity: 0.9;">Switch between admin, staff, and user accounts</p>
             </div>
         </div>
-        <form action="/switch-account" method="POST" style="display: flex; gap: 10px; align-items: center;">
-            <select name="user_id" style="padding: 10px 15px; border-radius: 8px; border: none; min-width: 200px; font-size: 14px;">
-                {% for account in session.get('switchable_accounts', []) %}
-                    {% if account.id != session.get('user') %}
-                    <option value="{{ account.id }}">{{ account.name }} ({{ account.role|title }})</option>
-                    {% endif %}
-                {% endfor %}
-            </select>
-            <button type="submit" style="background: #00bfa5; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 600;">
-                <i class="fas fa-sign-in-alt"></i> Switch
-            </button>
-        </form>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <!-- Switch to User Login -->
+            <a href="/login?switch=user" style="background: #2196F3; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-user"></i> User Login
+            </a>
+            <!-- Switch to User Register -->
+            <a href="/register?switch=user" style="background: #FF9800; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-user-plus"></i> User Register
+            </a>
+            <!-- Switch back to Admin -->
+            {% if session.get('previous_accounts') %}
+            <a href="/switch-back" style="background: #00bfa5; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-arrow-left"></i> Switch Back
+            </a>
+            {% endif %}
+        </div>
     </div>
 </div>
 {% endif %}

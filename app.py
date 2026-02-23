@@ -309,6 +309,34 @@ def logout():
     return redirect("/login")
 
 # ------------------- ACCOUNT SWITCHING -------------------
+@app.route("/switch-to-user")
+def switch_to_user():
+    """Switch to user mode - logout and redirect to login/register"""
+    # Store current admin info for switching back
+    if session.get("user"):
+        if "previous_accounts" not in session:
+            session["previous_accounts"] = []
+        prev_accounts = session.get("previous_accounts", [])
+        if session.get("user") not in [a.get("id") for a in prev_accounts]:
+            prev_accounts.append({
+                "id": session.get("user"),
+                "name": session.get("user_name"),
+                "email": session.get("email"),
+                "role": session.get("role")
+            })
+            session["previous_accounts"] = prev_accounts[-5:]
+    
+    # Clear session but keep previous_accounts
+    previous_accounts = session.get("previous_accounts", [])
+    session.clear()
+    session["previous_accounts"] = previous_accounts
+    
+    # Redirect to login or register based on parameter
+    target = request.args.get("target", "login")
+    if target == "register":
+        return redirect("/register?switch=user")
+    return redirect("/login?switch=user")
+
 @app.route("/switch-account", methods=["POST"])
 @login_required
 def switch_account():
