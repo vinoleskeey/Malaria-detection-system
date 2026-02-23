@@ -683,17 +683,31 @@
                 </ul>
             </li>
             
-            <!-- Developer Tools Dropdown -->
+            <!-- Staff & Departments Dropdown -->
             <li class="nav-item dropdown">
                 <a href="#" class="nav-link">
-                    <i class="fas fa-cogs"></i> Developer Tools
+                    <i class="fas fa-user-md"></i> Staff & Depts
                     <span class="arrow">▸</span>
                 </a>
                 <ul class="dropdown-menu">
-                    <li><a href="/dev/staff-list"><i class="fas fa-user-md"></i> Manage Staff</a></li>
-                    <li><a href="/dev/create-staff"><i class="fas fa-user-plus"></i> Create Staff</a></li>
-                    <li><a href="/users"><i class="fas fa-users"></i> Manage Users</a></li>
+                    <li><a href="/staff"><i class="fas fa-users"></i> View All Staff</a></li>
+                    <li><a href="/staff/add"><i class="fas fa-user-plus"></i> Add New Staff</a></li>
+                    <li class="dropdown-divider"></li>
+                    <li class="dropdown-header">Departments</li>
+                    <li><a href="/staff?dept=Doctors"><i class="fas fa-stethoscope"></i> Doctors</a></li>
+                    <li><a href="/staff?dept=Nursing"><i class="fas fa-user-nurse"></i> Nursing</a></li>
+                    <li><a href="/staff?dept=Laboratory"><i class="fas fa-flask"></i> Laboratory</a></li>
+                    <li><a href="/staff?dept=Pharmacy"><i class="fas fa-pills"></i> Pharmacy</a></li>
+                    <li><a href="/staff?dept=Administration"><i class="fas fa-briefcase"></i> Administration</a></li>
+                    <li><a href="/staff?dept=Reception"><i class="fas fa-concierge-bell"></i> Reception</a></li>
                 </ul>
+            </li>
+            
+            <!-- Manage Users -->
+            <li class="nav-item">
+                <a href="/users" class="nav-link">
+                    <i class="fas fa-users-cog"></i> Manage Users
+                </a>
             </li>
             
             <!-- Predictions Dropdown -->
