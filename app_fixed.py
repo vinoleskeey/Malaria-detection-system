@@ -12,20 +12,35 @@ import numpy as np
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
+DEVELOPER_EMAIL = 'victorshittu17@gmail.com'
+
 # ------------------- AUTO DATABASE INITIALIZATION -------------------
 def init_db():
     import sqlite3
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
     
+    # Users table with role support
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL
+        password TEXT NOT NULL,
+        role TEXT DEFAULT 'patient',
+        phone TEXT,
+        address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    
+    # Add role column if it doesn't exist
+    try:
+        c.execute("SELECT role FROM users LIMIT 1")
+    except:
+        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'patient'")
+        c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
+        c.execute("ALTER TABLE users ADD COLUMN address TEXT")
     
     c.execute("""
     CREATE TABLE IF NOT EXISTS patients (
@@ -34,6 +49,7 @@ def init_db():
         name TEXT NOT NULL,
         age INTEGER,
         gender TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
@@ -47,10 +63,13 @@ def init_db():
     CREATE TABLE IF NOT EXISTS predictions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         patient_id INTEGER,
+        staff_id INTEGER,
+        staff_name TEXT,
         result TEXT,
         probability REAL,
         malaria_score REAL,
         no_malaria_score REAL,
+        symptoms TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (patient_id) REFERENCES patients(id)
     )
@@ -172,6 +191,16 @@ def login():
         if user and check_password_hash(user["password"], password):
             session["user"] = user["id"]
             session["user_name"] = user["name"]
+            session["email"] = user["email"]
+            
+            # Set role based on email - developer gets full access
+            if email == DEVELOPER_EMAIL:
+                session["role"] = "admin"
+                session["is_admin"] = True
+            else:
+                session["role"] = "patient"
+                session["is_admin"] = False
+            
             return redirect("/dashboard")
         else:
             flash("Invalid email or password!")
@@ -188,16 +217,29 @@ def logout():
 @login_required
 def dashboard():
     db = get_db()
+    user_email = session.get("email")
+    is_admin = session.get("is_admin", False)
+    
     total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
     total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
     high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
     low_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) <= 50").fetchone()[0]
+    
+    # Get recent predictions with staff info
     recent = db.execute(
-        "SELECT p.name, pr.result, pr.probability, pr.created_at "
+        "SELECT p.name, pr.result, pr.probability, pr.staff_name, pr.created_at "
         "FROM predictions pr JOIN patients p ON pr.patient_id=p.id "
         "ORDER BY pr.created_at DESC LIMIT 5"
     ).fetchall()
-    recent_predictions = [tuple(row) for row in recent]
+    recent_predictions = [dict(row) for row in recent]
+    
+    # Get all patients for admin switch
+    all_patients = db.execute("""
+        SELECT p.id, p.name, u.email 
+        FROM patients p 
+        LEFT JOIN users u ON p.user_id = u.id
+    """).fetchall()
+    
     db.close()
     return render_template("auth/dashboard.html",
                            total_patients=total_patients,
@@ -205,6 +247,8 @@ def dashboard():
                            high_risk=high_risk,
                            low_risk=low_risk,
                            recent_predictions=recent_predictions,
+                           is_admin=is_admin,
+                           all_patients=all_patients,
                            metrics={"accuracy": 96.5, "precision": 95.8, "recall": 97.2, "f1_score": 96.5})
 
 # ------------------- PATIENTS -------------------
@@ -298,9 +342,13 @@ def predict():
                 print(f"Prediction error: {str(e)}")
                 return f"Error running prediction: {str(e)}"
 
+            # Get staff info for the prediction
+            staff_id = session.get("user")
+            staff_name = session.get("user_name")
+            
             db.execute(
-                "INSERT INTO predictions (patient_id, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?)",
-                (patient_id, result, probability, malaria_score, no_malaria_score)
+                "INSERT INTO predictions (patient_id, staff_id, staff_name, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (patient_id, staff_id, staff_name, result, probability, malaria_score, no_malaria_score)
             )
             db.commit()
             db.close()
@@ -366,7 +414,7 @@ def delete_staff(id):
 @login_required
 def list_users():
     db = get_db()
-    users = db.execute("SELECT id, name, email FROM users ORDER BY id DESC").fetchall()
+    users = db.execute("SELECT id, name, email, role FROM users ORDER BY id DESC").fetchall()
     db.close()
     return render_template("auth/list_users.html", users=users)
 
