@@ -128,7 +128,24 @@ def init_db():
     conn.close()
     print("Database initialized!")
 
+# Create default developer account if not exists
+def create_default_developer():
+    db = get_db()
+    developer = db.execute("SELECT * FROM users WHERE email = ?", (DEVELOPER_EMAIL,)).fetchone()
+    if not developer:
+        # Create default admin account with password "admin123"
+        password_hash = generate_password_hash("admin123")
+        try:
+            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+                       ("Victor Shittu", DEVELOPER_EMAIL, password_hash, "admin"))
+            db.commit()
+            print(f"Default developer account created: {DEVELOPER_EMAIL} with password 'admin123'")
+        except:
+            pass
+    db.close()
+
 init_db()
+create_default_developer()
 
 # ------------------- LOAD TENSORFLOW MODEL -------------------
 model = None
