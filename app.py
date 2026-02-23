@@ -28,7 +28,10 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
 
 # Developer email - only this email can access staff features
-DEVELOPER_EMAIL = os.environ.get('DEVELOPER_EMAIL', 'your_email@example.com')
+DEVELOPER_EMAIL = os.environ.get('DEVELOPER_EMAIL', 'victorshittu17@gmail.com')
+
+# Base URL for password reset links
+app.config['BASE_URL'] = os.environ.get('BASE_URL', 'https://malaria-detection-system-production.up.railway.app')
 
 # ------------------- AUTO DATABASE INITIALIZATION -------------------
 def init_db():
