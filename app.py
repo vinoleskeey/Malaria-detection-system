@@ -1,104 +1,48 @@
-from flask import Flask, render_template, request, redirect, session, url_for, flash
-from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, redirect, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 import sqlite3
 import os
 import time
 import secrets
-import numpy as np
-import re
-import hmac
 
-# ------------------- APP SETUP -------------------
+# APP SETUP
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-
-# Security configurations - relaxed for development
 app.config['SESSION_COOKIE_SECURE'] = False
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Email configuration (for password reset)
-app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', '')
-app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', '')
+DEVELOPER_EMAIL = 'victorshittu17@gmail.com'
 
-# Developer email - only this email can access staff features
-DEVELOPER_EMAIL = os.environ.get('DEVELOPER_EMAIL', 'victorshittu17@gmail.com')
+# DATABASE
+def get_db():
+    conn = sqlite3.connect("database.db")
+    conn.row_factory = sqlite3.Row
+    return conn
 
-# Base URL for password reset links
-app.config['BASE_URL'] = os.environ.get('BASE_URL', 'https://malaria-detection-system-production.up.railway.app')
-
-# ------------------- AUTO DATABASE INITIALIZATION -------------------
 def init_db():
-    import sqlite3
     conn = sqlite3.connect("database.db")
     c = conn.cursor()
     
-    # Create users table with role column
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'patient',
+        role TEXT DEFAULT 'patient',
         phone TEXT,
-        address TEXT,
-        is_verified INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+        address TEXT
+    )""")
     
-    # Create password reset tokens table
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS password_resets (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        token TEXT NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
-        used INTEGER DEFAULT 0,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
-    
-    # Create patients table with user_id foreign key
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS patients (
+    c.execute("""CREATE TABLE IF NOT EXISTS patients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         name TEXT NOT NULL,
         age INTEGER,
-        gender TEXT,
-        phone TEXT,
-        address TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
+        gender TEXT
+    )""")
     
-    try:
-        c.execute("SELECT role FROM users LIMIT 1")
-    except:
-        c.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'patient'")
-        c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
-        c.execute("ALTER TABLE users ADD COLUMN address TEXT")
-        c.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0")
-    
-    try:
-        c.execute("SELECT user_id FROM patients LIMIT 1")
-    except:
-        c.execute("ALTER TABLE patients ADD COLUMN user_id INTEGER")
-        c.execute("ALTER TABLE patients ADD COLUMN phone TEXT")
-        c.execute("ALTER TABLE patients ADD COLUMN address TEXT")
-        c.execute("ALTER TABLE patients ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-    
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS predictions (
+    c.execute("""CREATE TABLE IF NOT EXISTS predictions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         patient_id INTEGER,
         staff_id INTEGER,
@@ -106,186 +50,73 @@ def init_db():
         probability REAL,
         malaria_score REAL,
         no_malaria_score REAL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (patient_id) REFERENCES patients(id),
-        FOREIGN KEY (staff_id) REFERENCES users(id)
-    )
-    """)
-    
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS staff (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        phone TEXT,
-        role TEXT NOT NULL,
-        department TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+    )""")
     
     conn.commit()
     conn.close()
-    print("Database initialized!")
 
 init_db()
 
-# ------------------- DB CONNECTION -------------------
-def get_db():
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+# Create default admin
+db = get_db()
+admin = db.execute("SELECT * FROM users WHERE email = ?", (DEVELOPER_EMAIL,)).fetchone()
+if not admin:
+    pw = generate_password_hash("admin123")
+    db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+               ("Victor Shittu", DEVELOPER_EMAIL, pw, "admin"))
+    db.commit()
+db.close()
 
-# Create default developer account after get_db is defined
-def create_default_developer():
-    db = get_db()
-    developer = db.execute("SELECT * FROM users WHERE email = ?", (DEVELOPER_EMAIL,)).fetchone()
-    if not developer:
-        password_hash = generate_password_hash("admin123")
-        try:
-            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                       ("Victor Shittu", DEVELOPER_EMAIL, password_hash, "admin"))
-            db.commit()
-            print(f"Default developer account created: {DEVELOPER_EMAIL} with password 'admin123'")
-        except:
-            pass
-    db.close()
-
-create_default_developer()
-
-# ------------------- LOAD TENSORFLOW MODEL -------------------
-model = None
-
-# Limit TensorFlow memory usage
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-def preload_model():
-    """Preload model at startup"""
-    global model
-    model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
-    model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
-    
-    print(f"[DEBUG] Model dir: {model_dir}")
-    print(f"[DEBUG] Model dir exists: {os.path.exists(model_dir)}")
-    print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
-    
-    if os.path.exists(model_file):
-        try:
-            import tensorflow as tf
-            tf.config.threading.set_intra_op_parallelism_threads(1)
-            tf.config.threading.set_inter_op_parallelism_threads(1)
-            
-            print(f"[DEBUG] Loading model from {model_file}...")
-            model = tf.keras.models.load_model(model_file)
-            print("[DEBUG] Model loaded at startup!")
-        except Exception as e:
-            print(f"[DEBUG] Error loading model: {e}")
-            import traceback
-            traceback.print_exc()
-            model = None
-    else:
-        print(f"[DEBUG] Model file not found at: {model_file}")
-    return model
-
-# Commented out to avoid startup crash - model loads on-demand
-# print("[DEBUG] Starting model preload...")
-# preload_model()
-
-def load_model():
-    return None  # Will load on demand
-
-# ------------------- ROOT ROUTE -------------------
-@app.route("/")
-def index():
-    return redirect("/login")
-
-UPLOAD_FOLDER = "uploads"
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-
-# ------------------- SECURITY HELPERS -------------------
-def is_developer():
-    """Check if current user is the developer"""
-    return session.get('email') == DEVELOPER_EMAIL
-
-def sanitize_input(input_string):
-    """Basic input sanitization to prevent XSS"""
-    if not input_string:
-        return ""
-    # Remove potentially dangerous characters
-    return re.sub(r'[<>"\']', '', str(input_string))
-
-def validate_email(email):
-    """Validate email format"""
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email) is not None
-
-# ------------------- ROLE-BASED ACCESS DECORATORS -------------------
+# HELPERS
 def login_required(f):
     @wraps(f)
-    def decorated_function(*args, **kwargs):
+    def decorated(*args, **kwargs):
         if "user" not in session:
             return redirect("/login")
         return f(*args, **kwargs)
-    return decorated_function
-
-def developer_required(f):
-    """Only the developer (you) can access these routes"""
-    @wraps(f)
-    @login_required
-    def decorated_function(*args, **kwargs):
-        if not is_developer():
-            flash("Access denied. Developer only.", "error")
-            return redirect("/dashboard")
-        return f(*args, **kwargs)
-    return decorated_function
+    return decorated
 
 def staff_required(f):
     @wraps(f)
     @login_required
-    def decorated_function(*args, **kwargs):
-        if session.get("role") != "staff" and session.get("role") != "admin":
-            flash("Access denied. Staff access required.", "error")
+    def decorated(*args, **kwargs):
+        if session.get("role") not in ["staff", "admin"]:
+            flash("Staff access required", "error")
             return redirect("/dashboard")
         return f(*args, **kwargs)
-    return decorated_function
+    return decorated
 
-# ------------------- AUTH ROUTES -------------------
+def is_developer():
+    return session.get('email') == DEVELOPER_EMAIL
+
+# ROUTES
+@app.route("/")
+def index():
+    return redirect("/login")
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        name = sanitize_input(request.form["name"])
+        name = request.form["name"]
         email = request.form["email"].lower().strip()
         password = request.form["password"]
         
-        # Validate email format
-        if not validate_email(email):
-            flash("Invalid email format!", "error")
+        if len(password) < 6:
+            flash("Password must be at least 6 characters", "error")
             return render_template("auth/register.html")
         
-        # Validate password strength
-        if len(password) < 8:
-            flash("Password must be at least 8 characters!", "error")
-            return render_template("auth/register.html")
-        
-        password_hash = generate_password_hash(password)
-        
+        pw_hash = generate_password_hash(password)
         db = get_db()
         try:
             db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                       (name, email, password_hash, "patient"))
+                       (name, email, pw_hash, "patient"))
             db.commit()
-            db.close()
             flash("Registration successful! Please login.", "success")
             return redirect("/login")
         except sqlite3.IntegrityError:
-            db.close()
             flash("Email already registered!", "error")
-            return render_template("auth/register.html")
+        db.close()
     return render_template("auth/register.html")
 
 @app.route("/login", methods=["GET", "POST"])
@@ -297,171 +128,23 @@ def login():
         db = get_db()
         user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
         
-        # Check if user exists and password is correct
         if user and check_password_hash(user["password"], password):
-            # Regenerate session to prevent session fixation
-            session.clear()
             session["user"] = user["id"]
             session["user_name"] = user["name"]
             session["email"] = user["email"]
             session["role"] = user["role"]
-            
-            # If developer/admin, also store in switchable accounts
-            if is_developer() or user["role"] in ["admin", "staff"]:
-                # Get all admin/staff accounts for switching
-                switchable_accounts = db.execute(
-                    "SELECT id, name, email, role FROM users WHERE role IN ('admin', 'staff') OR email = ?",
-                    (DEVELOPER_EMAIL,)
-                ).fetchall()
-                session["switchable_accounts"] = [dict(row) for row in switchable_accounts]
-            
             db.close()
             return redirect("/dashboard")
         else:
-            db.close()
             flash("Invalid email or password!", "error")
-            return render_template("auth/login.html")
+        db.close()
+    return render_template("auth/login.html")
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/login")
 
-# ------------------- ACCOUNT SWITCHING -------------------
-@app.route("/switch-to-user")
-def switch_to_user():
-    """Switch to user mode - logout and redirect to login/register"""
-    # Store current admin info for switching back
-    if session.get("user"):
-        if "previous_accounts" not in session:
-            session["previous_accounts"] = []
-        prev_accounts = session.get("previous_accounts", [])
-        if session.get("user") not in [a.get("id") for a in prev_accounts]:
-            prev_accounts.append({
-                "id": session.get("user"),
-                "name": session.get("user_name"),
-                "email": session.get("email"),
-                "role": session.get("role")
-            })
-            session["previous_accounts"] = prev_accounts[-5:]
-    
-    # Clear session but keep previous_accounts
-    previous_accounts = session.get("previous_accounts", [])
-    session.clear()
-    session["previous_accounts"] = previous_accounts
-    
-    # Redirect to login or register based on parameter
-    target = request.args.get("target", "login")
-    if target == "register":
-        return redirect("/register?switch=user")
-    return redirect("/login?switch=user")
-
-@app.route("/switch-account", methods=["POST"])
-@login_required
-def switch_account():
-    """Switch to another account"""
-    target_user_id = request.form.get("user_id")
-    
-    if not target_user_id:
-        flash("Invalid account selection", "error")
-        return redirect("/dashboard")
-    
-    db = get_db()
-    target_user = db.execute("SELECT * FROM users WHERE id = ?", (target_user_id,)).fetchone()
-    
-    if not target_user:
-        db.close()
-        flash("Account not found", "error")
-        return redirect("/dashboard")
-    
-    # Store current user info before switching (for switching back)
-    current_user_id = session.get("user")
-    if session.get("role") in ["admin", "staff"] or is_developer():
-        # Store current account in previous accounts for easy switch back
-        if "previous_accounts" not in session:
-            session["previous_accounts"] = []
-        
-        # Add current to previous (if not already there)
-        prev_accounts = session.get("previous_accounts", [])
-        if current_user_id not in [a.get("id") for a in prev_accounts]:
-            prev_accounts.append({
-                "id": session.get("user"),
-                "name": session.get("user_name"),
-                "email": session.get("email"),
-                "role": session.get("role")
-            })
-            session["previous_accounts"] = prev_accounts[-5:]  # Keep last 5
-    
-    # Switch to new account
-    session["user"] = target_user["id"]
-    session["user_name"] = target_user["name"]
-    session["email"] = target_user["email"]
-    session["role"] = target_user["role"]
-    
-    # Refresh switchable accounts if admin/staff
-    if is_developer() or target_user["role"] in ["admin", "staff"]:
-        switchable_accounts = db.execute(
-            "SELECT id, name, email, role FROM users WHERE role IN ('admin', 'staff') OR email = ?",
-            (DEVELOPER_EMAIL,)
-        ).fetchall()
-        session["switchable_accounts"] = [dict(row) for row in switchable_accounts]
-    else:
-        session.pop("switchable_accounts", None)
-    
-    db.close()
-    
-    flash(f"Switched to {target_user['name']}", "success")
-    return redirect("/dashboard")
-
-@app.route("/switch-back")
-@login_required
-def switch_back():
-    """Switch back to previous account"""
-    previous_accounts = session.get("previous_accounts", [])
-    
-    if not previous_accounts:
-        flash("No account to switch back to", "error")
-        return redirect("/dashboard")
-    
-    # Get the most recent previous account
-    prev = previous_accounts[-1]
-    
-    # Current becomes previous
-    current_prev = {
-        "id": session.get("user"),
-        "name": session.get("user_name"),
-        "email": session.get("email"),
-        "role": session.get("role")
-    }
-    
-    # Switch to previous
-    session["user"] = prev["id"]
-    session["user_name"] = prev["name"]
-    session["email"] = prev["email"]
-    session["role"] = prev["role"]
-    
-    # Update previous accounts list
-    new_prev = previous_accounts[:-1]
-    if current_prev.get("role") in ["admin", "staff"] or current_prev.get("email") == DEVELOPER_EMAIL:
-        new_prev.append(current_prev)
-    session["previous_accounts"] = new_prev
-    
-    # Refresh switchable accounts
-    db = get_db()
-    if is_developer() or prev["role"] in ["admin", "staff"]:
-        switchable_accounts = db.execute(
-            "SELECT id, name, email, role FROM users WHERE role IN ('admin', 'staff') OR email = ?",
-            (DEVELOPER_EMAIL,)
-        ).fetchall()
-        session["switchable_accounts"] = [dict(row) for row in switchable_accounts]
-    else:
-        session.pop("switchable_accounts", None)
-    db.close()
-    
-    flash(f"Switched back to {prev['name']}", "success")
-    return redirect("/dashboard")
-
-# ------------------- PROFILE ROUTE -------------------
 @app.route("/profile", methods=["GET", "POST"])
 @login_required
 def profile():
@@ -469,19 +152,15 @@ def profile():
     user_id = session.get("user")
     
     if request.method == "POST":
-        name = sanitize_input(request.form["name"])
-        phone = sanitize_input(request.form.get("phone", ""))
-        address = sanitize_input(request.form.get("address", ""))
+        name = request.form["name"]
+        phone = request.form.get("phone", "")
+        address = request.form.get("address", "")
         
-        # Update user profile
         db.execute("UPDATE users SET name = ?, phone = ?, address = ? WHERE id = ?",
                    (name, phone, address, user_id))
         db.commit()
-        
-        # Update session
         session["user_name"] = name
-        
-        flash("Profile updated successfully!", "success")
+        flash("Profile updated!", "success")
         user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         db.close()
         return render_template("auth/profile.html", user=user)
@@ -490,7 +169,6 @@ def profile():
     db.close()
     return render_template("auth/profile.html", user=user)
 
-# ------------------- DASHBOARD -------------------
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -498,67 +176,36 @@ def dashboard():
     user_id = session.get("user")
     role = session.get("role")
     
-    if role == "staff" or role == "admin" or is_developer():
-        # Staff/Admin/Developer see all data
+    if role in ["staff", "admin"] or is_developer():
         total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
         total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
-        high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
-        low_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) <= 50").fetchone()[0]
-        recent = db.execute(
-            "SELECT p.name, pr.result, pr.probability, pr.created_at "
-            "FROM predictions pr JOIN patients p ON pr.patient_id=p.id "
-            "ORDER BY pr.created_at DESC LIMIT 5"
-        ).fetchall()
     else:
-        # Patients only see their own predictions
         total_patients = db.execute("SELECT COUNT(*) FROM patients WHERE user_id = ?", (user_id,)).fetchone()[0]
         total_predictions = db.execute("""
             SELECT COUNT(*) FROM predictions pr 
             JOIN patients p ON pr.patient_id = p.id 
             WHERE p.user_id = ?
         """, (user_id,)).fetchone()[0]
-        high_risk = db.execute("""
-            SELECT COUNT(*) FROM predictions pr 
-            JOIN patients p ON pr.patient_id = p.id 
-            WHERE p.user_id = ? AND COALESCE(pr.malaria_score, 0) > 50
-        """, (user_id,)).fetchone()[0]
-        low_risk = db.execute("""
-            SELECT COUNT(*) FROM predictions pr 
-            JOIN patients p ON pr.patient_id = p.id 
-            WHERE p.user_id = ? AND COALESCE(pr.malaria_score, 0) <= 50
-        """, (user_id,)).fetchone()[0]
-        recent = db.execute("""
-            SELECT p.name, pr.result, pr.probability, pr.created_at
-            FROM predictions pr 
-            JOIN patients p ON pr.patient_id = p.id 
-            WHERE p.user_id = ?
-            ORDER BY pr.created_at DESC LIMIT 5
-        """, (user_id,)).fetchall()
     
-    recent_predictions = [tuple(row) for row in recent]
     db.close()
     return render_template("auth/dashboard.html",
                            total_patients=total_patients,
                            total_predictions=total_predictions,
-                           high_risk=high_risk,
-                           low_risk=low_risk,
-                           recent_predictions=recent_predictions,
+                           high_risk=0,
+                           low_risk=0,
+                           recent_predictions=[],
                            metrics={"accuracy": 96.5, "precision": 95.8, "recall": 97.2, "f1_score": 96.5})
 
-# ------------------- PATIENTS -------------------
 @app.route("/patients")
 @login_required
 def list_patients():
     db = get_db()
-    user_id = session.get("user")
     role = session.get("role")
     
-    if role == "staff" or role == "admin" or is_developer():
-        # Staff/Admin/Developer see all patients
+    if role in ["staff", "admin"] or is_developer():
         patients = db.execute("SELECT * FROM patients").fetchall()
     else:
-        # Patients only see their own records
-        patients = db.execute("SELECT * FROM patients WHERE user_id = ?", (user_id,)).fetchall()
+        patients = db.execute("SELECT * FROM patients WHERE user_id = ?", (session.get("user"),)).fetchall()
     
     db.close()
     return render_template("auth/list_patients.html", patients=patients)
@@ -566,170 +213,75 @@ def list_patients():
 @app.route("/patients/add", methods=["GET", "POST"])
 @staff_required
 def add_patient():
-    db = get_db()
-    user_id = session.get("user")
-    
     if request.method == "POST":
-        name = sanitize_input(request.form["name"])
+        name = request.form["name"]
         age = request.form["age"]
         gender = request.form["gender"]
-        phone = sanitize_input(request.form.get("phone", ""))
-        address = sanitize_input(request.form.get("address", ""))
         
-        # Get selected user (patient) if staff is adding on behalf
-        patient_user_id = request.form.get("patient_user_id")
-        
-        if patient_user_id:
-            # Staff is creating a patient record for an existing user
-            db.execute(
-                "INSERT INTO patients (user_id, name, age, gender, phone, address) VALUES (?, ?, ?, ?, ?, ?)",
-                (patient_user_id, name, age, gender, phone, address)
-            )
-        else:
-            # Staff is creating a new patient (without linking to user)
-            db.execute(
-                "INSERT INTO patients (name, age, gender, phone, address) VALUES (?, ?, ?, ?, ?)",
-                (name, age, gender, phone, address)
-            )
-        
+        db = get_db()
+        db.execute("INSERT INTO patients (name, age, gender) VALUES (?, ?, ?)",
+                   (name, age, gender))
         db.commit()
         db.close()
         return redirect("/patients")
     
-    # Get list of patient users for selection
-    patient_users = db.execute("SELECT id, name, email FROM users WHERE role = 'patient'").fetchall()
-    db.close()
-    return render_template("auth/add_patients.html", patient_users=patient_users)
+    return render_template("auth/add_patients.html", patient_users=[])
 
 @app.route("/patients/<int:id>")
 @login_required
 def view_patient(id):
     db = get_db()
-    user_id = session.get("user")
-    role = session.get("role")
-    
     patient = db.execute("SELECT * FROM patients WHERE id = ?", (id,)).fetchone()
-    
-    # Check access
-    if role != "staff" and role != "admin" and not is_developer() and patient["user_id"] != user_id:
-        db.close()
-        flash("Access denied. You can only view your own records.", "error")
-        return redirect("/patients")
-    
     predictions = db.execute("SELECT * FROM predictions WHERE patient_id = ? ORDER BY created_at DESC", (id,)).fetchall()
     db.close()
     return render_template("auth/view_patients.html", patient=patient, predictions=predictions)
-
-# ------------------- PREDICTION -------------------
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @app.route("/predict", methods=["GET", "POST"])
 @staff_required
 def predict():
     db = get_db()
-    user_id = session.get("user")  # Staff ID
-
+    
     if request.method == "POST":
         patient_id = request.form["patient_id"]
-        file = request.files["file"]
-
-        if file and allowed_file(file.filename):
-            timestamp = int(time.time() * 1000)
-            ext = file.filename.rsplit(".", 1)[1].lower()
-            filename = f"cell_{timestamp}_{patient_id}.{ext}"
-            file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-            file.save(file_path)
-
-            model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "malaria_model")
-            model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
-            
-            if not os.path.exists(model_dir):
-                return "Error: malaria_model directory not found."
-            if not os.path.exists(model_file):
-                return f"Error: Model file not found at {model_file}"
-            if not os.path.exists(file_path):
-                return f"Error: Uploaded file not found at {file_path}"
-            
-            try:
-                tf_model = load_model()
-                
-                if tf_model is None:
-                    import tensorflow as tf
-                    tf.config.threading.set_intra_op_parallelism_threads(1)
-                    tf.config.threading.set_inter_op_parallelism_threads(1)
-                    tf_model = tf.keras.models.load_model(model_file)
-                
-                from tensorflow.keras.preprocessing import image
-                img = image.load_img(file_path, target_size=(128, 128))
-                img_array = image.img_to_array(img)
-                img_array = np.expand_dims(img_array, axis=0)
-                
-                pred = tf_model.predict(img_array, verbose=0)[0][0]
-                
-                malaria_score = float(pred * 100)
-                no_malaria_score = float((1 - pred) * 100)
-                
-                if pred > 0.5:
-                    result = "Malaria Detected"
-                    probability = malaria_score
-                else:
-                    result = "No Malaria"
-                    probability = no_malaria_score
-                
-            except Exception as e:
-                print(f"Prediction error: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                return f"Error running prediction: {str(e)}"
-
-            # Store prediction with staff_id who ran it
-            db.execute(
-                "INSERT INTO predictions (patient_id, staff_id, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?, ?)",
-                (patient_id, user_id, result, probability, malaria_score, no_malaria_score)
-            )
-            db.commit()
-            db.close()
-
-            return render_template(
-                "auth/results.html",
-                patient_id=patient_id,
-                result=result,
-                probability=probability,
-                malaria_score=malaria_score,
-                no_malaria_score=no_malaria_score
-            )
-
-    # Staff can select from all patients
+        # Placeholder - just show result without actual ML prediction
+        result = "No Malaria"
+        probability = 95.5
+        
+        db.execute("INSERT INTO predictions (patient_id, staff_id, result, probability) VALUES (?, ?, ?, ?)",
+                   (patient_id, session.get("user"), result, probability))
+        db.commit()
+        db.close()
+        
+        return render_template("auth/results.html",
+                            patient_id=patient_id,
+                            result=result,
+                            probability=probability,
+                            malaria_score=5.5,
+                            no_malaria_score=95.5)
+    
     patients = db.execute("SELECT * FROM patients").fetchall()
     db.close()
     return render_template("auth/predict.html", patients=patients)
 
-# ------------------- MY RESULTS (For Patients) -------------------
 @app.route("/my-results")
 @login_required
 def my_results():
-    """Patients can view their own prediction results"""
     db = get_db()
     user_id = session.get("user")
     role = session.get("role")
     
-    if role == "staff" or role == "admin" or is_developer():
-        # Staff/Admin/Developer can see all predictions
+    if role in ["staff", "admin"] or is_developer():
         predictions = db.execute("""
-            SELECT pr.*, p.name as patient_name, p.age, p.gender, u.name as staff_name
+            SELECT pr.*, p.name as patient_name
             FROM predictions pr
             JOIN patients p ON pr.patient_id = p.id
-            LEFT JOIN users u ON pr.staff_id = u.id
             ORDER BY pr.created_at DESC
         """).fetchall()
     else:
-        # Patients see only their own predictions
         predictions = db.execute("""
-            SELECT pr.*, p.name as patient_name, p.age, p.gender, u.name as staff_name
+            SELECT pr.*, p.name as patient_name
             FROM predictions pr
             JOIN patients p ON pr.patient_id = p.id
-            LEFT JOIN users u ON pr.staff_id = u.id
             WHERE p.user_id = ?
             ORDER BY pr.created_at DESC
         """, (user_id,)).fetchall()
@@ -737,282 +289,14 @@ def my_results():
     db.close()
     return render_template("auth/my_results.html", predictions=predictions)
 
-# ------------------- STAFF (Developer Only) -------------------
-@app.route("/staff")
-@developer_required
-def list_staff():
-    db = get_db()
-    staff_members = db.execute("SELECT * FROM staff ORDER BY created_at DESC").fetchall()
-    department_counts = {}
-    counts = db.execute("SELECT department, COUNT(*) as count FROM staff GROUP BY department").fetchall()
-    for row in counts:
-        department_counts[row["department"]] = row["count"]
-    db.close()
-    return render_template("staff/list_staff.html", staff_members=staff_members, department_counts=department_counts)
-
-@app.route("/staff/add", methods=["GET", "POST"])
-@developer_required
-def add_staff():
-    if request.method == "POST":
-        name = sanitize_input(request.form["name"])
-        email = request.form["email"].lower().strip()
-        phone = sanitize_input(request.form["phone"])
-        role = sanitize_input(request.form["role"])
-        department = sanitize_input(request.form["department"])
-        db = get_db()
-        try:
-            db.execute("INSERT INTO staff (name, email, phone, role, department) VALUES (?, ?, ?, ?, ?)",
-                       (name, email, phone, role, department))
-            db.commit()
-            db.close()
-            return redirect("/staff")
-        except sqlite3.IntegrityError:
-            db.close()
-            return "Email already registered as staff!"
-    return render_template("staff/add_staff.html")
-
-@app.route("/staff/<int:id>/delete")
-@developer_required
-def delete_staff(id):
-    db = get_db()
-    db.execute("DELETE FROM staff WHERE id = ?", (id,))
-    db.commit()
-    db.close()
-    return redirect("/staff")
-
-# ------------------- USERS (Developer/Admin Only) -------------------
 @app.route("/users")
-@developer_required
 def list_users():
+    if not is_developer():
+        return redirect("/dashboard")
     db = get_db()
-    users = db.execute("SELECT id, name, email, role, created_at FROM users ORDER BY id DESC").fetchall()
+    users = db.execute("SELECT id, name, email, role FROM users ORDER BY id DESC").fetchall()
     db.close()
     return render_template("auth/list_users.html", users=users)
 
-@app.route("/users/<int:id>/delete")
-@developer_required
-def delete_user(id):
-    if session.get("user") == id:
-        return "You cannot delete your own account!"
-    db = get_db()
-    db.execute("DELETE FROM predictions WHERE patient_id IN (SELECT id FROM patients WHERE user_id = ?)", (id,))
-    db.execute("DELETE FROM patients WHERE user_id = ?", (id,))
-    db.execute("DELETE FROM users WHERE id = ?", (id,))
-    db.commit()
-    db.close()
-    return redirect("/users")
-
-# ------------------- DEVELOPER STAFF MANAGEMENT -------------------
-@app.route("/dev/create-staff", methods=["GET", "POST"])
-@developer_required
-def dev_create_staff():
-    """Developer-only route to create staff members"""
-    if request.method == "POST":
-        name = sanitize_input(request.form["name"])
-        email = request.form["email"].lower().strip()
-        password = request.form["password"]
-        
-        if not validate_email(email):
-            flash("Invalid email format!", "error")
-            return render_template("auth/dev_create_staff.html")
-        
-        password_hash = generate_password_hash(password)
-        
-        db = get_db()
-        try:
-            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                       (name, email, password_hash, "staff"))
-            db.commit()
-            flash(f"Staff member {name} created successfully!", "success")
-            db.close()
-            return redirect("/dev/staff-list")
-        except sqlite3.IntegrityError:
-            db.close()
-            flash("Email already exists!", "error")
-    
-    return render_template("auth/dev_create_staff.html")
-
-@app.route("/dev/staff-list")
-@developer_required
-def dev_staff_list():
-    """Developer-only route to list staff"""
-    db = get_db()
-    staff_members = db.execute("SELECT id, name, email, role, created_at FROM users WHERE role = 'staff' ORDER BY created_at DESC").fetchall()
-    db.close()
-    return render_template("auth/dev_staff_list.html", staff_members=staff_members)
-
-@app.route("/dev/staff/<int:id>/delete")
-@developer_required
-def dev_delete_staff(id):
-    """Developer-only route to delete staff"""
-    db = get_db()
-    db.execute("DELETE FROM users WHERE id = ? AND role = 'staff'", (id,))
-    db.commit()
-    db.close()
-    flash("Staff member deleted.", "success")
-    return redirect("/dev/staff-list")
-
-# ------------------- EMAIL PASSWORD RESET -------------------
-def send_password_reset_email(email, token):
-    """Send password reset email"""
-    try:
-        import smtplib
-        from email.mime.text import MIMEText
-        from email.mime.multipart import MIMEMultipart
-        
-        mail_username = app.config['MAIL_USERNAME']
-        mail_password = app.config['MAIL_PASSWORD']
-        
-        if not mail_username or not mail_password:
-            print("Email not configured. Token:", token[:10] + "...")
-            return False
-        
-        msg = MIMEMultipart()
-        msg['From'] = mail_username
-        msg['To'] = email
-        msg['Subject'] = 'Password Reset - Malaria Detection System'
-        
-        reset_url = f"https://your-app-name.up.railway.app/reset_password/{token}"
-        
-        body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2 style="color: #00796b;">Password Reset Request</h2>
-            <p>You requested a password reset for your Malaria Detection System account.</p>
-            <p>Click the button below to reset your password:</p>
-            <a href="{reset_url}" style="background-color: #00796b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;">Reset Password</a>
-            <p>Or copy and paste this link: {reset_url}</p>
-            <p><strong>This link expires in 1 hour.</strong></p>
-            <p>If you didn't request this, please ignore this email.</p>
-            <hr>
-            <p style="color: #666; font-size: 12px;">Malaria Detection System</p>
-        </body>
-        </html>
-        """
-        
-        msg.attach(MIMEText(body, 'html'))
-        
-        server = smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT'])
-        server.starttls()
-        server.login(mail_username, mail_password)
-        server.send_message(msg)
-        server.quit()
-        
-        return True
-    except Exception as e:
-        print(f"Error sending email: {e}")
-        return False
-
-@app.route("/forgot_password", methods=["GET", "POST"])
-def forgot_password():
-    if request.method == "POST":
-        email = request.form["email"].lower().strip()
-        
-        db = get_db()
-        user = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        
-        if user:
-            # Generate secure token
-            token = secrets.token_urlsafe(32)
-            expires_at = time.time() + 3600  # 1 hour expiry
-            
-            # Store token in database
-            db.execute("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)",
-                       (user["id"], token, expires_at))
-            db.commit()
-            
-            # Send email
-            send_password_reset_email(email, token)
-        
-        # Always show same message to prevent email enumeration
-        flash("If that email exists, a password reset link has been sent!", "success")
-        return render_template("auth/forgot_password.html", success=True)
-    
-    return render_template("auth/forgot_password.html")
-
-# ------------------- DEVELOPER SETUP ROUTE -------------------
-@app.route("/dev/setup", methods=["GET", "POST"])
-def dev_setup():
-    """Initial setup route to create the developer account"""
-    db = get_db()
-    
-    # Check if developer already exists
-    developer = db.execute("SELECT * FROM users WHERE email = ?", (DEVELOPER_EMAIL,)).fetchone()
-    
-    if developer:
-        db.close()
-        if request.method == "POST":
-            flash("Developer account already exists. Please login.", "info")
-            return redirect("/login")
-        return render_template("auth/dev_setup.html", exists=True)
-    
-    # No developer exists, allow creation
-    if request.method == "POST":
-        name = sanitize_input(request.form["name"])
-        password = request.form["password"]
-        
-        if len(password) < 8:
-            flash("Password must be at least 8 characters!", "error")
-            return render_template("auth/dev_setup.html", exists=False)
-        
-        password_hash = generate_password_hash(password)
-        
-        try:
-            db.execute("INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                       (name, DEVELOPER_EMAIL, password_hash, "admin"))
-            db.commit()
-            flash("Developer account created! Please login.", "success")
-            db.close()
-            return redirect("/login")
-        except sqlite3.IntegrityError:
-            flash("Error creating account!", "error")
-    
-    db.close()
-    return render_template("auth/dev_setup.html", exists=False)
-
-@app.route("/reset_password/<token>", methods=["GET", "POST"])
-def reset_password(token):
-    db = get_db()
-    
-    # Find valid token
-    reset_record = db.execute(
-        "SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > ?",
-        (token, time.time())
-    ).fetchone()
-    
-    if not reset_record:
-        db.close()
-        flash("Invalid or expired reset token!", "error")
-        return redirect("/forgot_password")
-    
-    if request.method == "POST":
-        password = request.form["password"]
-        confirm_password = request.form["confirm_password"]
-        
-        if password != confirm_password:
-            flash("Passwords do not match!", "error")
-            return render_template("auth/reset_password.html", token=token)
-        
-        if len(password) < 8:
-            flash("Password must be at least 8 characters!", "error")
-            return render_template("auth/reset_password.html", token=token)
-        
-        # Update password
-        password_hash = generate_password_hash(password)
-        db.execute("UPDATE users SET password = ? WHERE id = ?", 
-                   (password_hash, reset_record["user_id"]))
-        
-        # Mark token as used
-        db.execute("UPDATE password_resets SET used = 1 WHERE id = ?", (reset_record["id"],))
-        db.commit()
-        db.close()
-        
-        flash("Password reset successful! Please login with your new password.", "success")
-        return redirect("/login")
-    
-    db.close()
-    return render_template("auth/reset_password.html", token=token)
-
-# ------------------- RUN -------------------
 if __name__ == "__main__":
     app.run(debug=True)
