@@ -187,11 +187,12 @@ def preload_model():
         print(f"[DEBUG] Model file not found at: {model_file}")
     return model
 
-print("[DEBUG] Starting model preload...")
-preload_model()
+# Commented out to avoid startup crash - model loads on-demand
+# print("[DEBUG] Starting model preload...")
+# preload_model()
 
 def load_model():
-    return model
+    return None  # Will load on demand
 
 # ------------------- ROOT ROUTE -------------------
 @app.route("/")
