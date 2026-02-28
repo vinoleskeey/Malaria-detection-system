@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block header %}User Profile{% endblock %}
+{% block content %}
+
+<div class="profile-container">
+    <h2><i class="fas fa-user"></i> User Profile</h2>
+    
+    <div class="profile-card">
+        <div class="profile-info">
+            <h3>{{ user.name }}</h3>
+            <p><strong>Email:</strong> {{ user.email }}</p>
+            <p><strong>Role:</strong> <span class="badge">{{ user.role }}</span></p>
+            <p><strong>Phone:</strong> {{ user.phone or 'Not provided' }}</p>
+            <p><strong>Address:</strong> {{ user.address or 'Not provided' }}</p>
+            <p><strong>Joined:</strong> {{ user.created_at }}</p>
+        </div>
+        
+        {% if patient %}
+        <div class="profile-section">
+            <h4><i class="fas fa-user-injured"></i> Patient Information</h4>
+            <p><strong>Patient Name:</strong> {{ patient.name }}</p>
+            <p><strong>Age:</strong> {{ patient.age or 'Not provided' }}</p>
+            <p><strong>Gender:</strong> {{ patient.gender or 'Not provided' }}</p>
+        </div>
+        {% endif %}
+        
+        {% if staff_profile %}
+        <div class="profile-section">
+            <h4><i class="fas fa-id-card"></i> Staff Information</h4>
+            <p><strong>Department:</strong> {{ staff_profile.department or 'Not provided' }}</p>
+            <p><strong>Position:</strong> {{ staff_profile.position or 'Not provided' }}</p>
+            <p><strong>Employee ID:</strong> {{ staff_profile.employee_id or 'Not provided' }}</p>
+        </div>
+        {% endif %}
+        
+        {% if predictions %}
+        <div class="profile-section">
+            <h4><i class="fas fa-file-medical"></i> Prediction History</h4>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Result</th>
+                        <th>Probability</th>
+                        <th>Staff</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pred in predictions %}
+                    <tr>
+                        <td>{{ pred.created_at }}</td>
+                        <td>
+                            <span class="badge {% if pred.result == 'Malaria Detected' %}badge-danger{% else %}badge-success{% endif %}">
+                                {{ pred.result }}
+                            </span>
+                        </td>
+                        <td>{{ "%.1f"|format(pred.probability) }}%</td>
+                        <td>{{ pred.staff_name or 'N/A' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+    
+    <div class="profile-actions">
+        {% if session.get('role') == 'admin' and session.get('user') != user.id %}
+        <a href="/users/{{ user.id }}/delete" class="btn btn-danger" onclick="return confirm('Are you sure you want to delete this user?')">
+            <i class="fas fa-trash"></i> Delete User
+        </a>
+        {% endif %}
+        <a href="/dashboard" class="btn btn-secondary">
+            <i class="fas fa-arrow-left"></i> Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<style>
+.profile-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+.profile-card {
+    background: white;
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+.profile-info {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+}
+.profile-info h3 {
+    color: #00796b;
+    margin-bottom: 15px;
+}
+.profile-section {
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+}
+.profile-section h4 {
+    color: #00796b;
+    margin-bottom: 15px;
+}
+.badge {
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge-success {
+    background: #4caf50;
+    color: white;
+}
+.badge-danger {
+    background: #f44336;
+    color: white;
+}
+.profile-actions {
+    display: flex;
+    gap: 10px;
+}
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.data-table th, .data-table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+.data-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+}
+</style>
+
+{% endblock %}

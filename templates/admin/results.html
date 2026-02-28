@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prediction Results - Admin Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #e8f4f8 0%, #d4e9f7 100%); min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { color: white; font-size: 22px; }
+        .header a { color: white; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 8px; }
+        .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
+        .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { color: #1a237e; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); color: white; padding: 14px; text-align: left; }
+        td { padding: 14px; border-bottom: 1px solid #f0f0f0; }
+        .badge { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+        .badge-danger { background: #ff6b6b; color: white; }
+        .badge-success { background: #56ab2f; color: white; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-list-alt"></i> All Prediction Results</h1>
+        <a href="/admin/dashboard"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+    </div>
+    <div class="container">
+        <div class="card">
+            <h2><i class="fas fa-history"></i> Recent Predictions</h2>
+            {% if predictions %}
+            <table>
+                <tr>
+                    <th>Patient</th>
+                    <th>Result</th>
+                    <th>Probability</th>
+                    <th>Tested By</th>
+                    <th>Date</th>
+                </tr>
+                {% for p in predictions %}
+                <tr>
+                    <td>{{ p.patient_name }}</td>
+                    <td>
+                        {% if p.result == 'Malaria Detected' %}
+                        <span class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> Malaria Detected</span>
+                        {% else %}
+                        <span class="badge badge-success"><i class="fas fa-check-circle"></i> No Malaria</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ p.probability }}%</td>
+                    <td>{{ p.staff_name or 'N/A' }}</td>
+                    <td>{{ p.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <p style="text-align: center; color: #666; padding: 40px;">No predictions yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

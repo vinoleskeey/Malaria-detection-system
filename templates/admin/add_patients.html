@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Add Patient - Admin Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #e8f4f8 0%, #d4e9f7 100%); min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { color: white; font-size: 22px; }
+        .header a { color: white; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 8px; }
+        .container { max-width: 600px; margin: 40px auto; padding: 0 20px; }
+        .card { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .card h2 { color: #1a237e; margin-bottom: 30px; text-align: center; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; color: #333; font-weight: 500; }
+        .form-group input, .form-group select { width: 100%; padding: 14px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 15px; font-family: 'Poppins', sans-serif; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: #1a237e; }
+        .btn { width: 100%; padding: 16px; background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; }
+        .btn:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-user-plus"></i> Add Patient</h1>
+        <a href="/admin/patients"><i class="fas fa-arrow-left"></i> Back to Patients</a>
+    </div>
+    <div class="container">
+        <div class="card">
+            <h2><i class="fas fa-user-plus"></i> Add New Patient</h2>
+            <form method="post">
+                <div class="form-group">
+                    <label><i class="fas fa-user"></i> Patient Name</label>
+                    <input type="text" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-calendar"></i> Age</label>
+                    <input type="number" name="age" required>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-venus-mars"></i> Gender</label>
+                    <select name="gender" required>
+                        <option value="">-- Select Gender --</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn"><i class="fas fa-plus"></i> Add Patient</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

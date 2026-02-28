@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Staff - Admin Portal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Poppins', sans-serif; background: linear-gradient(135deg, #e8f4f8 0%, #d4e9f7 100%); min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); padding: 20px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { color: white; font-size: 22px; }
+        .header a { color: white; text-decoration: none; padding: 10px 20px; background: rgba(255,255,255,0.2); border-radius: 8px; margin-left: 10px; }
+        .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
+        .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h2 { color: #1a237e; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); color: white; padding: 14px; text-align: left; }
+        td { padding: 14px; border-bottom: 1px solid #f0f0f0; }
+        .btn-add { display: inline-block; background: #ff6b6b; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; margin-bottom: 20px; }
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+        .badge-admin { background: #1a237e; color: white; }
+        .badge-staff { background: #ff6b6b; color: white; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-user-md"></i> Staff Management</h1>
+        <div>
+            <a href="/admin/staff/add"><i class="fas fa-plus"></i> Add Staff</a>
+            <a href="/admin/dashboard"><i class="fas fa-arrow-left"></i> Dashboard</a>
+        </div>
+    </div>
+    <div class="container">
+        <div class="card">
+            <a href="/admin/staff/add" class="btn-add"><i class="fas fa-plus"></i> Add New Staff</a>
+            <h2><i class="fas fa-user-md"></i> All Staff Members</h2>
+            {% if staff %}
+            <table>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Department</th>
+                    <th>Created</th>
+                </tr>
+                {% for s in staff %}
+                <tr>
+                    <td>{{ s.id }}</td>
+                    <td>{{ s.name }}</td>
+                    <td>{{ s.email }}</td>
+                    <td><span class="badge badge-{{ s.role }}">{{ s.role|upper }}</span></td>
+                    <td>{{ s.department or 'N/A' }}</td>
+                    <td>{{ s.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            {% else %}
+            <p style="text-align: center; color: #666; padding: 40px;">No staff members yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
