@@ -1,34 +1,44 @@
-# TODO - Role-Based Access Control Implementation
+# Admin Portal - Malaria Detection System
 
-## Phase 1: Database & Authentication Updates
-- [x] 1.1 Update users table - add role column (patient/staff/admin)
-- [x] 1.2 Update patients table - add user_id foreign key
-- [x] 1.3 Modify registration to include role selection
-- [x] 1.4 Update login to store user role in session
+## Task: Create a separate admin/hospital staff portal
 
-## Phase 2: Access Control Decorators
-- [x] 2.1 Create staff_required decorator
-- [x] 2.2 Create patient_required decorator
-- [x] 2.3 Apply decorators to routes
+## Plan Completed:
 
-## Phase 3: Route Modifications
-- [x] 3.1 Dashboard - show different content based on role
-- [x] 3.2 Patients - staff can view all, patients see only theirs
-- [x] 3.3 Predictions - staff can run, patients can only view results
-- [x] 3.4 Staff routes - staff only access
+### 1. Admin App (app_admin.py) ✅
+- [x] Create new Flask app for admin portal
+- [x] Separate database (uses same database with role-based access)
+- [x] Admin-specific authentication (register/login)
+- [x] Routes for admin dashboard
+- [x] Account switching routes
 
-## Phase 4: Profile Page
-- [x] 4.1 Create /profile route (GET/POST)
-- [x] 4.2 Create profile.html template
-- [x] 4.3 Add profile link to navbar
+### 2. Admin Templates ✅
+- [x] Admin login page (templates/admin/login.html)
+- [x] Admin register page (templates/admin/register.html)
+- [x] Admin dashboard with patient switching (templates/admin/dashboard.html)
 
-## Phase 5: Template Updates
-- [x] 5.1 Update base.html navbar for role-based menu items
-- [x] 5.2 Update register.html with role selection
+### 3. Account Switching Features ✅
+- [x] Switch to patient account route
+- [x] Switch to staff account route
+- [x] Switch back to admin route
+- [x] UI dropdown in admin dashboard for switching
 
-## Phase 6: Deployment Configuration
-- [x] 6.1 Create railway.json
-- [x] 6.2 Verify Procfile
+### 4. Features Implemented:
+- Separate admin login at /admin/login
+- Separate admin register at /admin/register
+- Admin dashboard at /admin/dashboard
+- Account switcher dropdown to view patient accounts
+- Account switcher dropdown to view staff accounts
+- "Back to Admin" link when viewing as patient/staff
+- Link back to main patient portal
 
-## Dependencies:
-- No new Python packages needed
+## How to Run:
+
+1. Run the main app (patient portal): `python app.py`
+   - Main portal at: http://localhost:5000
+
+2. Run the admin app: `python app_admin.py`
+   - Admin portal at: http://localhost:5001
+
+## Default Admin Account:
+- Email: victorshittu17@gmail.com
+- Password: admin123

@@ -2,30 +2,35 @@
 {% block header %}Dashboard{% endblock %}
 {% block content %}
 
-<!-- Account Switcher for Admin/Staff -->
-{% if session.get('role') in ['admin', 'staff'] or session.get('email') == 'victorshittu17@gmail.com' %}
+<!-- Account Switcher for Admin -->
+{% if is_admin %}
 <div style="background: linear-gradient(135deg, #00796b 0%, #004d40 100%); padding: 20px; border-radius: 12px; margin-bottom: 25px; color: white;">
     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
         <div style="display: flex; align-items: center; gap: 15px;">
             <i class="fas fa-exchange-alt" style="font-size: 24px;"></i>
             <div>
-                <h4 style="margin: 0; font-size: 16px;">Account Switcher</h4>
-                <p style="margin: 5px 0 0; font-size: 13px; opacity: 0.9;">Switch between admin, staff, and user accounts</p>
+                <h4 style="margin: 0; font-size: 16px;">Admin Control Panel</h4>
+                <p style="margin: 5px 0 0; font-size: 13px; opacity: 0.9;">Switch to view any patient's account</p>
             </div>
         </div>
         <div style="display: flex; gap: 10px; align-items: center;">
-            <!-- Switch to User Login -->
-            <a href="/login?switch=user" style="background: #2196F3; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                <i class="fas fa-user"></i> User Login
+            <!-- Link to Admin Portal -->
+            <a href="http://localhost:5001/admin/dashboard" target="_blank" style="background: #1a237e; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-user-shield"></i> Go to Admin Portal
             </a>
-            <!-- Switch to User Register -->
-            <a href="/register?switch=user" style="background: #FF9800; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                <i class="fas fa-user-plus"></i> User Register
-            </a>
-            <!-- Switch back to Admin -->
-            {% if session.get('previous_accounts') %}
-            <a href="/switch-back" style="background: #00bfa5; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                <i class="fas fa-arrow-left"></i> Switch Back
+            <!-- Dropdown to switch to patient -->
+            <div style="position: relative;">
+                <select onchange="switchToPatient(this.value)" style="padding: 10px 20px; border-radius: 8px; border: none; background: #2196F3; color: white; font-weight: 600; cursor: pointer;">
+                    <option value="">-- Switch to Patient --</option>
+                    {% for p in all_patients %}
+                    <option value="{{ p.id }}">{{ p.name }} ({{ p.email }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <!-- Switch back if viewing as patient -->
+            {% if session.get('viewing_as_patient') %}
+            <a href="/switch-back-admin" style="background: #00bfa5; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-arrow-left"></i> Back to Admin
             </a>
             {% endif %}
         </div>
@@ -33,6 +38,18 @@
 </div>
 {% endif %}
 
+<script>
+function switchToPatient(userId) {
+    if (userId) {
+        if (confirm('Switch to view this patient\'s account? You can switch back anytime.')) {
+            window.location.href = '/switch-to-patient/' + userId;
+        }
+    }
+}
+</script>
+
+{% if is_admin %}
+<!-- ADMIN/STAFF DASHBOARD -->
 <div class="cards">
     <div class="card">
         <div class="card-icon patients">
@@ -52,29 +69,29 @@
         <div class="card-icon high-risk">
             <i class="fas fa-exclamation-triangle"></i>
         </div>
-        <h3>High-risk Patients</h3>
+        <h3>Malaria Detected</h3>
         <p>{{ high_risk }}</p>
     </div>
     <div class="card">
         <div class="card-icon low-risk">
             <i class="fas fa-check-circle"></i>
         </div>
-        <h3>Low-risk Patients</h3>
+        <h3>No Malaria</h3>
         <p>{{ low_risk }}</p>
     </div>
     <div class="card">
         <div class="card-icon staff">
             <i class="fas fa-user-md"></i>
         </div>
-        <h3>Hospital Staff</h3>
-        <p><a href="/staff" style="text-decoration: none; color: inherit;">View Staff <i class="fas fa-arrow-right"></i></a></p>
+        <h3>Run Prediction</h3>
+        <p><a href="/predict" style="text-decoration: none; color: inherit;">New Test <i class="fas fa-arrow-right"></i></a></p>
     </div>
     <div class="card">
         <div class="card-icon" style="background: linear-gradient(135deg, #f857a6 0%, #ff5858 100%);">
             <i class="fas fa-user-cog"></i>
         </div>
         <h3>User Accounts</h3>
-        <p><a href="/users" style="text-decoration: none; color: inherit;">Manage Users <i class="fas fa-arrow-right"></i></a></p>
+        <p><a href="/users" style="text-decoration: none; color: inherit;">Manage <i class="fas fa-arrow-right"></i></a></p>
     </div>
 </div>
 
@@ -125,33 +142,101 @@
         <th><i class="fas fa-user"></i> Patient</th>
         <th><i class="fas fa-stethoscope"></i> Result</th>
         <th><i class="fas fa-percentage"></i> Probability</th>
+        <th><i class="fas fa-user-md"></i> Tested By</th>
         <th><i class="fas fa-calendar"></i> Date</th>
     </tr>
     {% for r in recent_predictions %}
     <tr>
-        <td>{{ r[0] }}</td>
+        <td>{{ r.patient_name }}</td>
         <td>
-            {% if r[1] == 'Malaria Detected' %}
+            {% if r.result == 'Malaria Detected' %}
             <span class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> Malaria Detected</span>
             {% else %}
             <span class="badge badge-success"><i class="fas fa-check-circle"></i> No Malaria</span>
             {% endif %}
         </td>
-        <td>{{ r[2] }}%</td>
-        <td>{{ r[3] }}</td>
+        <td>{{ r.probability }}%</td>
+        <td>{{ r.staff_name or 'N/A' }}</td>
+        <td>{{ r.created_at }}</td>
     </tr>
     {% endfor %}
 </table>
 
+{% else %}
+<!-- PATIENT DASHBOARD -->
+<div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 25px; border-radius: 15px; margin-bottom: 30px; border-left: 5px solid #4caf50;">
+    <h3 style="color: #2e7d32; margin-bottom: 10px;"><i class="fas fa-user-circle"></i> Welcome, {{ session.get('user_name') }}!</h3>
+    <p style="color: #558b2f; margin: 0;">This is your personal dashboard. You can view your prediction results and manage your profile.</p>
+</div>
+
+<div class="cards">
+    <div class="card">
+        <div class="card-icon predictions">
+            <i class="fas fa-file-medical-alt"></i>
+        </div>
+        <h3>My Predictions</h3>
+        <p>{{ predictions|length }}</p>
+    </div>
+    <div class="card">
+        <div class="card-icon low-risk">
+            <i class="fas fa-check-circle"></i>
+        </div>
+        <h3>No Malaria Results</h3>
+        <p>{% if predictions|length > 0 %}{{ predictions|selectattr('result', 'equalto', 'No Malaria')|list|length }}{% else %}0{% endif %}</p>
+    </div>
+    <div class="card">
+        <div class="card-icon high-risk">
+            <i class="fas fa-exclamation-triangle"></i>
+        </div>
+        <h3>Malaria Detected</h3>
+        <p>{% if predictions|length > 0 %}{{ predictions|selectattr('result', 'equalto', 'Malaria Detected')|list|length }}{% else %}0{% endif %}</p>
+    </div>
+</div>
+
+<h3 style="color: white; margin: 30px 0 15px; font-size: 20px;"><i class="fas fa-history"></i> My Prediction History</h3>
+{% if predictions %}
+<table>
+    <tr>
+        <th><i class="fas fa-stethoscope"></i> Result</th>
+        <th><i class="fas fa-percentage"></i> Probability</th>
+        <th><i class="fas fa-user-md"></i> Tested By</th>
+        <th><i class="fas fa-calendar"></i> Date</th>
+    </tr>
+    {% for p in predictions %}
+    <tr>
+        <td>
+            {% if p.result == 'Malaria Detected' %}
+            <span class="badge badge-danger"><i class="fas fa-exclamation-circle"></i> Malaria Detected</span>
+            {% else %}
+            <span class="badge badge-success"><i class="fas fa-check-circle"></i> No Malaria</span>
+            {% endif %}
+        </td>
+        <td>{{ p.probability }}%</td>
+        <td>{{ p.staff_name or 'N/A' }}</td>
+        <td>{{ p.created_at }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div style="background: white; padding: 40px; border-radius: 15px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+    <i class="fas fa-inbox" style="font-size: 48px; color: #bdbdbd; margin-bottom: 20px;"></i>
+    <h3 style="color: #757575;">No Predictions Yet</h3>
+    <p style="color: #9e9e9e;">You don't have any malaria test results yet.</p>
+</div>
+{% endif %}
+
+{% endif %}
+
+{% if is_admin %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script type="text/javascript">
-    var ctx = document.getElementById('predictionPieChart').getContext('2d');
+    var highRisk = {{ high_risk }}; var lowRisk = {{ low_risk }}; var ctx = document.getElementById('predictionPieChart').getContext('2d');
     var pieChart = new Chart(ctx, {
         type: 'doughnut',
         data: {
-            labels: ['High-risk (Parasitized)', 'Low-risk (Uninfected)'],
+            labels: ['Malaria Detected', 'No Malaria'],
             datasets: [{
-                data: [{{ high_risk }}, {{ low_risk }}],
+                data: [highRisk, lowRisk],
                 backgroundColor: [
                     'rgba(255, 99, 132, 0.8)',
                     'rgba(75, 192, 192, 0.8)'
@@ -177,6 +262,7 @@
         }
     });
 </script>
+{% endif %}
 
 <style>
     .dashboard-charts {
