@@ -1,480 +1,696 @@
-from flask import Flask, render_template, request, redirect, session, url_for, flash
-from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, redirect, session, flash, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 from functools import wraps
-import sqlite3
 import os
-import time
 import secrets
-import numpy as np
+import hashlib
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timedelta
+import sys
 
-# ------------------- APP SETUP -------------------
+# Add malaria_model to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'malaria_model'))
+try:
+    from malaria_predict import predict_malaria
+    HAS_MODEL = True
+except ImportError:
+    HAS_MODEL = False
+
+# ==================== APP SETUP ====================
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.config['SESSION_COOKIE_SECURE'] = False
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['UPLOAD_FOLDER'] = 'uploads'
+
+# Ensure upload folder exists
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DEVELOPER_EMAIL = 'victorshittu17@gmail.com'
 
-# ------------------- AUTO DATABASE INITIALIZATION -------------------
-def init_db():
-    import sqlite3
-    conn = sqlite3.connect("database.db")
-    c = conn.cursor()
+# ==================== SQLALCHEMY SETUP ====================
+db = SQLAlchemy(app)
+
+# ==================== MODELS ====================
+
+class User(db.Model):
+    __tablename__ = 'users'
     
-    # Users table with role support
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT DEFAULT 'patient',
-        phone TEXT,
-        address TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(20), default='patient')
+    phone = db.Column(db.String(20))
+    address = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    # Add role column if it doesn't exist
+    # Relationships
+    patient = db.relationship('Patient', backref='user', uselist=False)
+    staff_profile = db.relationship('StaffProfile', backref='user', uselist=False)
+    predictions = db.relationship('Prediction', backref='staff', lazy=True)
+
+class Patient(db.Model):
+    __tablename__ = 'patients'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    name = db.Column(db.String(100), nullable=False)
+    age = db.Column(db.Integer)
+    gender = db.Column(db.String(10))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    predictions = db.relationship('Prediction', backref='patient', lazy=True)
+
+class Prediction(db.Model):
+    __tablename__ = 'predictions'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patients.id'))
+    staff_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    staff_name = db.Column(db.String(100))
+    result = db.Column(db.String(50))
+    probability = db.Column(db.Float)
+    malaria_score = db.Column(db.Float)
+    no_malaria_score = db.Column(db.Float)
+    symptoms = db.Column(db.Text)
+    image_path = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class StaffProfile(db.Model):
+    __tablename__ = 'staff_profiles'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
+    department = db.Column(db.String(50))
+    position = db.Column(db.String(50))
+    employee_id = db.Column(db.String(50))
+
+class PasswordReset(db.Model):
+    __tablename__ = 'password_resets'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    token = db.Column(db.String(100), unique=True)
+    expires = db.Column(db.DateTime)
+    used = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+# Create all tables and default admin account
+with app.app_context():
+    db.create_all()
+    
+    # Add image_path column if it doesn't exist (migration)
     try:
-        c.execute("SELECT role FROM users LIMIT 1")
-    except:
-        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'patient'")
-        c.execute("ALTER TABLE users ADD COLUMN phone TEXT")
-        c.execute("ALTER TABLE users ADD COLUMN address TEXT")
+        from sqlalchemy import text
+        result = db.session.execute(text("PRAGMA table_info(predictions)"))
+        columns = [row[1] for row in result]
+        if 'image_path' not in columns:
+            db.session.execute(text("ALTER TABLE predictions ADD COLUMN image_path VARCHAR(200)"))
+            db.session.commit()
+            print("Added image_path column to predictions table")
+    except Exception as e:
+        print(f"Migration check: {e}")
     
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS patients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        name TEXT NOT NULL,
-        age INTEGER,
-        gender TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-    """)
-    
-    try:
-        c.execute("SELECT user_id FROM patients LIMIT 1")
-    except:
-        c.execute("ALTER TABLE patients ADD COLUMN user_id INTEGER")
-    
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS predictions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        patient_id INTEGER,
-        staff_id INTEGER,
-        staff_name TEXT,
-        result TEXT,
-        probability REAL,
-        malaria_score REAL,
-        no_malaria_score REAL,
-        symptoms TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (patient_id) REFERENCES patients(id)
-    )
-    """)
-    
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS staff (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        phone TEXT,
-        role TEXT NOT NULL,
-        department TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    
-    conn.commit()
-    conn.close()
-    print("Database initialized!")
+    # Create default admin account
+    admin = User.query.filter_by(email=DEVELOPER_EMAIL).first()
+    if not admin:
+        pw_hash = generate_password_hash("admin123")
+        admin = User(name="Victor Shittu", email=DEVELOPER_EMAIL, password=pw_hash, role="admin")
+        db.session.add(admin)
+        db.session.commit()
+        print("Admin account created!")
 
-init_db()
+# ==================== DECORATORS ====================
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if "user" not in session:
+            return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated
 
-# ------------------- LOAD TENSORFLOW MODEL -------------------
-model = None
+def staff_required(f):
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if session.get("role") not in ["staff", "admin"]:
+            flash("Staff access required for this action", "error")
+            return redirect("/dashboard")
+        return f(*args, **kwargs)
+    return decorated
 
-# Limit TensorFlow memory usage
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+def admin_required(f):
+    @wraps(f)
+    @login_required
+    def decorated(*args, **kwargs):
+        if session.get("role") != "admin":
+            flash("Admin access required", "error")
+            return redirect("/dashboard")
+        return f(*args, **kwargs)
+    return decorated
 
-def preload_model():
-    """Preload model at startup"""
-    global model
-    # Use the model from the malaria_model folder
-    model_dir = "C:/Users/VICTOR SHITTU/malaria_model"
-    model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
-    
-    print(f"[DEBUG] Model dir: {model_dir}")
-    print(f"[DEBUG] Model dir exists: {os.path.exists(model_dir)}")
-    print(f"[DEBUG] Model file exists: {os.path.exists(model_file)}")
-    
-    if os.path.exists(model_file):
-        try:
-            import tensorflow as tf
-            tf.config.threading.set_intra_op_parallelism_threads(1)
-            tf.config.threading.set_inter_op_parallelism_threads(1)
-            
-            print(f"[DEBUG] Loading model from {model_file}...")
-            model = tf.keras.models.load_model(model_file)
-            print("[DEBUG] Model loaded at startup!")
-        except Exception as e:
-            print(f"[DEBUG] Error loading model: {e}")
-            import traceback
-            traceback.print_exc()
-            model = None
-    else:
-        print(f"[DEBUG] Model file not found at: {model_file}")
-    return model
+def is_developer():
+    return session.get('email') == DEVELOPER_EMAIL
 
-print("[DEBUG] Starting model preload...")
-preload_model()
+# ==================== ROUTES ====================
 
-def load_model():
-    return model
-
-# ------------------- ROOT ROUTE -------------------
 @app.route("/")
 def index():
     return redirect("/login")
 
-UPLOAD_FOLDER = "uploads"
-ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg"}
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+# ------------------- AUTH -------------------
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-# ------------------- DB CONNECTION -------------------
-def get_db():
-    conn = sqlite3.connect("database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-# ------------------- LOGIN DECORATOR -------------------
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if "user" not in session:
-            return redirect("/login")
-        return f(*args, **kwargs)
-    return decorated_function
-
-# ------------------- AUTH ROUTES -------------------
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
         name = request.form["name"]
-        email = request.form["email"]
-        password = generate_password_hash(request.form["password"])
-        db = get_db()
-        try:
-            db.execute("INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
-                       (name, email, password))
-            db.commit()
-            db.close()
-            return redirect("/login")
-        except sqlite3.IntegrityError:
-            db.close()
-            return "Email already registered!"
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        confirm = request.form.get("confirm_password", "")
+        
+        if password != confirm:
+            flash("Passwords do not match!", "error")
+            return render_template("auth/register.html")
+        
+        if len(password) < 6:
+            flash("Password must be at least 6 characters", "error")
+            return render_template("auth/register.html")
+        
+        pw_hash = generate_password_hash(password)
+        
+        # Check if email exists
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            flash("Email already registered!", "error")
+            return render_template("auth/register.html")
+        
+        user = User(name=name, email=email, password=pw_hash, role="patient")
+        db.session.add(user)
+        db.session.commit()
+        
+        flash("Registration successful! Please login.", "success")
+        return redirect("/login")
+    
     return render_template("auth/register.html")
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        email = request.form["email"]
+        email = request.form["email"].lower().strip()
         password = request.form["password"]
-        db = get_db()
-        user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
-        db.close()
-        if user and check_password_hash(user["password"], password):
-            session["user"] = user["id"]
-            session["user_name"] = user["name"]
-            session["email"] = user["email"]
-            
-            # Set role based on email - developer gets full access
-            if email == DEVELOPER_EMAIL:
-                session["role"] = "admin"
-                session["is_admin"] = True
-            else:
-                session["role"] = "patient"
-                session["is_admin"] = False
-            
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if user and check_password_hash(user.password, password):
+            # Store session
+            session["user"] = user.id
+            session["user_name"] = user.name
+            session["email"] = user.email
+            session["role"] = user.role
             return redirect("/dashboard")
         else:
-            flash("Invalid email or password!")
-            return render_template("auth/login.html")
+            flash("Invalid email or password!", "error")
+    
     return render_template("auth/login.html")
 
 @app.route("/logout")
 def logout():
+    # Store original admin info before clearing
+    original_email = session.get("original_email")
+    original_role = session.get("original_role")
+    
     session.clear()
+    
+    # If switching back from patient view, restore admin
+    if original_email and original_email == DEVELOPER_EMAIL:
+        session["user"] = session.get("original_user_id")
+        session["user_name"] = session.get("original_user_name")
+        session["email"] = original_email
+        session["role"] = original_role
+    
     return redirect("/login")
 
+# ------------------- PROFILE -------------------
+
+@app.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    user_id = session.get("user")
+    user = db.session.get(User, user_id)
+    
+    if request.method == "POST":
+        name = request.form["name"]
+        phone = request.form.get("phone", "")
+        address = request.form.get("address", "")
+        
+        user.name = name
+        user.phone = phone
+        user.address = address
+        db.session.commit()
+        
+        session["user_name"] = name
+        flash("Profile updated successfully!", "success")
+        return render_template("auth/profile.html", user=user)
+    
+    return render_template("auth/profile.html", user=user)
+
 # ------------------- DASHBOARD -------------------
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    db = get_db()
-    user_email = session.get("email")
-    is_admin = session.get("is_admin", False)
+    """Main dashboard - redirects based on role"""
+    role = session.get("role")
+    viewing_as_patient = session.get("viewing_as_patient", False)
     
-    total_patients = db.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
-    total_predictions = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
-    high_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) > 50").fetchone()[0]
-    low_risk = db.execute("SELECT COUNT(*) FROM predictions WHERE COALESCE(malaria_score, 0) <= 50").fetchone()[0]
+    if role in ["admin", "staff"] and not viewing_as_patient:
+        return redirect("/admin/dashboard")
+    else:
+        return redirect("/patient/dashboard")
+
+@app.route("/admin/dashboard")
+@login_required
+def admin_dashboard():
+    """Admin/Staff Dashboard"""
+    role = session.get("role")
+    viewing_as = session.get("viewing_as_patient", False)
+
+    if role not in ["admin", "staff"] or viewing_as:
+        return redirect("/patient/dashboard")
     
-    # Get recent predictions with staff info
-    recent = db.execute(
-        "SELECT p.name, pr.result, pr.probability, pr.staff_name, pr.created_at "
-        "FROM predictions pr JOIN patients p ON pr.patient_id=p.id "
-        "ORDER BY pr.created_at DESC LIMIT 5"
-    ).fetchall()
-    recent_predictions = [dict(row) for row in recent]
+    # Staff/Admin Dashboard - full access
+    total_patients = Patient.query.count()
+    total_predictions = Prediction.query.count()
+    high_risk = Prediction.query.filter_by(result='Malaria Detected').count()
+    low_risk = Prediction.query.filter_by(result='No Malaria').count()
     
-    # Get all patients for admin switch
-    all_patients = db.execute("""
-        SELECT p.id, p.name, u.email 
-        FROM patients p 
-        LEFT JOIN users u ON p.user_id = u.id
-    """).fetchall()
+    # Get recent predictions with patient names
+    recent = db.session.query(
+        Prediction, Patient.name
+    ).join(Patient).order_by(Prediction.created_at.desc()).limit(5).all()
     
-    db.close()
-    return render_template("auth/dashboard.html",
+    # Format predictions for template
+    recent_predictions = []
+    for pred, patient_name in recent:
+        recent_predictions.append({
+            'id': pred.id,
+            'patient_name': patient_name,
+            'result': pred.result,
+            'probability': pred.probability,
+            'staff_name': pred.staff_name,
+            'created_at': pred.created_at
+        })
+    
+    # Get all patients for switching
+    all_patients = User.query.filter_by(role='patient').all()
+    
+    # Get all staff for switching
+    all_staff = User.query.filter(User.role.in_(['staff', 'admin'])).all()
+    
+    return render_template("admin/dashboard.html",
                            total_patients=total_patients,
                            total_predictions=total_predictions,
                            high_risk=high_risk,
                            low_risk=low_risk,
                            recent_predictions=recent_predictions,
-                           is_admin=is_admin,
+                           metrics={"accuracy": 96.5, "precision": 95.8, "recall": 97.2, "f1_score": 96.5},
                            all_patients=all_patients,
-                           metrics={"accuracy": 96.5, "precision": 95.8, "recall": 97.2, "f1_score": 96.5})
+                           all_staff=all_staff,
+                           is_admin=True)
 
-# ------------------- PATIENTS -------------------
-@app.route("/patients")
+@app.route("/patient/dashboard")
 @login_required
-def list_patients():
-    db = get_db()
-    patients = db.execute("SELECT * FROM patients").fetchall()
-    db.close()
-    return render_template("auth/list_patients.html", patients=patients)
-
-@app.route("/patients/add", methods=["GET", "POST"])
-@login_required
-def add_patient():
-    if request.method == "POST":
-        name = request.form["name"]
-        age = request.form["age"]
-        gender = request.form["gender"]
-        db = get_db()
-        db.execute("INSERT INTO patients (name, age, gender) VALUES (?, ?, ?)",
-                   (name, age, gender))
-        db.commit()
-        db.close()
-        return redirect("/patients")
-    return render_template("auth/add_patients.html")
-
-@app.route("/patients/<int:id>")
-@login_required
-def view_patient(id):
-    db = get_db()
-    patient = db.execute("SELECT * FROM patients WHERE id=?", (id,)).fetchone()
-    predictions = db.execute("SELECT * FROM predictions WHERE patient_id=? ORDER BY created_at DESC", (id,)).fetchall()
-    db.close()
-    return render_template("auth/view_patients.html", patient=patient, predictions=predictions)
-
-# ------------------- PREDICTION -------------------
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-@app.route("/predict", methods=["GET", "POST"])
-@login_required
-def predict():
-    db = get_db()
-
-    if request.method == "POST":
-        patient_id = request.form["patient_id"]
-        file = request.files["file"]
-
-        if file and allowed_file(file.filename):
-            timestamp = int(time.time() * 1000)
-            ext = file.filename.rsplit(".", 1)[1].lower()
-            filename = f"cell_{timestamp}_{patient_id}.{ext}"
-            file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-            file.save(file_path)
-
-            model_dir = "C:/Users/VICTOR SHITTU/malaria_model"
-            model_file = os.path.join(model_dir, "malaria_cnn_model.keras")
-            
-            if not os.path.exists(model_dir):
-                return "Error: malaria_model directory not found."
-            if not os.path.exists(model_file):
-                return f"Error: Model file not found at {model_file}"
-            if not os.path.exists(file_path):
-                return f"Error: Uploaded file not found at {file_path}"
-            
-            try:
-                tf_model = load_model()
-                if tf_model is None:
-                    return "Error: Could not load TensorFlow model"
-                
-                from tensorflow.keras.preprocessing import image
-                img = image.load_img(file_path, target_size=(128, 128))
-                img_array = image.img_to_array(img)
-                img_array = np.expand_dims(img_array, axis=0)
-                
-                pred = tf_model.predict(img_array, verbose=0)[0][0]
-                
-                malaria_score = float(pred * 100)
-                no_malaria_score = float((1 - pred) * 100)
-                
-                if pred > 0.5:
-                    result = "Malaria Detected"
-                    probability = malaria_score
-                else:
-                    result = "No Malaria"
-                    probability = no_malaria_score
-                
-                print(f"Prediction: {result}, Probability: {probability}")
-                
-            except Exception as e:
-                print(f"Prediction error: {str(e)}")
-                return f"Error running prediction: {str(e)}"
-
-            # Get staff info for the prediction
-            staff_id = session.get("user")
-            staff_name = session.get("user_name")
-            
-            db.execute(
-                "INSERT INTO predictions (patient_id, staff_id, staff_name, result, probability, malaria_score, no_malaria_score) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (patient_id, staff_id, staff_name, result, probability, malaria_score, no_malaria_score)
-            )
-            db.commit()
-            db.close()
-
-            return render_template(
-                "auth/results.html",
-                patient_id=patient_id,
-                result=result,
-                probability=probability,
-                malaria_score=malaria_score,
-                no_malaria_score=no_malaria_score
-            )
-
-    patients = db.execute("SELECT * FROM patients").fetchall()
-    db.close()
-    return render_template("auth/predict.html", patients=patients)
-
-# ------------------- STAFF -------------------
-@app.route("/staff")
-@login_required
-def list_staff():
-    db = get_db()
-    staff_members = db.execute("SELECT * FROM staff ORDER BY created_at DESC").fetchall()
-    department_counts = {}
-    counts = db.execute("SELECT department, COUNT(*) as count FROM staff GROUP BY department").fetchall()
-    for row in counts:
-        department_counts[row["department"]] = row["count"]
-    db.close()
-    return render_template("staff/list_staff.html", staff_members=staff_members, department_counts=department_counts)
-
-@app.route("/staff/add", methods=["GET", "POST"])
-@login_required
-def add_staff():
-    if request.method == "POST":
-        name = request.form["name"]
-        email = request.form["email"]
-        phone = request.form["phone"]
-        role = request.form["role"]
-        department = request.form["department"]
-        db = get_db()
-        try:
-            db.execute("INSERT INTO staff (name, email, phone, role, department) VALUES (?, ?, ?, ?, ?)",
-                       (name, email, phone, role, department))
-            db.commit()
-            db.close()
-            return redirect("/staff")
-        except sqlite3.IntegrityError:
-            db.close()
-            return "Email already registered as staff!"
-    return render_template("staff/add_staff.html")
-
-@app.route("/staff/<int:id>/delete")
-@login_required
-def delete_staff(id):
-    db = get_db()
-    db.execute("DELETE FROM staff WHERE id=?", (id,))
-    db.commit()
-    db.close()
-    return redirect("/staff")
-
-# ------------------- USERS -------------------
-@app.route("/users")
-@login_required
-def list_users():
-    db = get_db()
-    users = db.execute("SELECT id, name, email, role FROM users ORDER BY id DESC").fetchall()
-    db.close()
-    return render_template("auth/list_users.html", users=users)
-
-@app.route("/users/<int:id>/delete")
-@login_required
-def delete_user(id):
-    if session.get("user") == id:
-        return "You cannot delete your own account!"
-    db = get_db()
-    db.execute("DELETE FROM predictions WHERE patient_id IN (SELECT id FROM patients WHERE user_id=?)", (id,))
-    db.execute("DELETE FROM patients WHERE user_id=?", (id,))
-    db.execute("DELETE FROM users WHERE id=?", (id,))
-    db.commit()
-    db.close()
-    return redirect("/users")
-
-# ------------------- PROFILE -------------------
-@app.route("/profile", methods=["GET", "POST"])
-@login_required
-def profile():
-    db = get_db()
+def patient_dashboard():
+    """Patient Dashboard"""
     user_id = session.get("user")
+    role = session.get("role")
     
-    if request.method == "POST":
-        name = request.form["name"]
-        db.execute("UPDATE users SET name = ? WHERE id = ?", (name, user_id))
-        db.commit()
-        session["user_name"] = name
-        flash("Profile updated successfully!", "success")
-        user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        db.close()
-        return render_template("auth/profile.html", user=user)
+    # Only patients can access this dashboard (unless admin is viewing as patient)
+    if role not in ["patient"] and not session.get("viewing_as_patient"):
+        return redirect("/admin/dashboard")
     
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    db.close()
-    return render_template("auth/profile.html", user=user)
-
-# ------------------- MY RESULTS -------------------
-@app.route("/my-results")
-@login_required
-def my_results():
-    db = get_db()
-    user_id = session.get("user")
-    
-    patient = db.execute("SELECT * FROM patients WHERE user_id = ?", (user_id,)).fetchone()
+    # Get patient's own predictions
+    patient = Patient.query.filter_by(user_id=user_id).first()
     
     if patient:
-        predictions = db.execute("""
-            SELECT pr.*, p.name as patient_name
-            FROM predictions pr
-            JOIN patients p ON pr.patient_id = p.id
-            WHERE p.user_id = ?
-            ORDER BY pr.created_at DESC
-        """, (user_id,)).fetchall()
+        predictions = Prediction.query.filter_by(patient_id=patient.id).order_by(Prediction.created_at.desc()).all()
     else:
         predictions = []
     
-    db.close()
+    return render_template("auth/dashboard.html",
+                           predictions=predictions,
+                           is_admin=False,
+                           patient=patient)
+
+# ------------------- ACCOUNT SWITCHING (For Admin) -------------------
+
+@app.route("/switch-to-patient/<int:patient_id>")
+@login_required
+def switch_to_patient(patient_id):
+    # Only admin/developer can switch accounts
+    if not is_developer() and session.get("role") != "admin":
+        flash("Access denied", "error")
+        return redirect("/dashboard")
+    
+    patient_user = User.query.filter_by(id=patient_id, role='patient').first()
+    
+    if patient_user:
+        # Store current admin info
+        session["original_user_id"] = session.get("user")
+        session["original_user_name"] = session.get("user_name")
+        session["original_email"] = session.get("email")
+        session["original_role"] = session.get("role")
+        
+        # Switch to patient view
+        session["user"] = patient_user.id
+        session["user_name"] = patient_user.name
+        session["email"] = patient_user.email
+        session["role"] = "patient"
+        session["viewing_as_patient"] = True
+        
+        flash(f"Switched to {patient_user.name}'s view", "success")
+        return redirect("/dashboard")
+    
+    flash("Patient not found", "error")
+    return redirect("/dashboard")
+
+@app.route("/switch-back-admin")
+@login_required
+def switch_back_admin():
+    if session.get("original_email"):
+        session["user"] = session.get("original_user_id")
+        session["user_name"] = session.get("original_user_name")
+        session["email"] = session.get("original_email")
+        session["role"] = session.get("original_role")
+        session.pop("viewing_as_patient", None)
+        flash("Returned to admin view", "success")
+    return redirect("/dashboard")
+
+# ------------------- PATIENTS (Staff Only) -------------------
+
+@app.route("/patients")
+@login_required
+def list_patients():
+    role = session.get("role")
+    viewing_as = session.get("viewing_as_patient", False)
+
+    if role in ["staff", "admin"] and not viewing_as:
+        # Show all patients
+        patients = Patient.query.join(User, Patient.user_id == User.id, isouter=True).all()
+        return render_template("auth/list_patients.html", patients=patients)
+
+    return redirect("/dashboard")
+
+# ------------------- MY RESULTS (Patient) -------------------
+
+@app.route("/my-results")
+@login_required
+def my_results():
+    """Show patient's own test results"""
+    user_id = session.get("user")
+    
+    # Get patient's own predictions
+    patient = Patient.query.filter_by(user_id=user_id).first()
+    
+    if patient:
+        predictions = Prediction.query.filter_by(patient_id=patient.id).order_by(Prediction.created_at.desc()).all()
+    else:
+        predictions = []
+    
     return render_template("auth/my_results.html", predictions=predictions, patient=patient)
 
-# ------------------- RUN -------------------
+# ------------------- MEDICAL RECORDS (Patient) -------------------
+
+@app.route("/medical-records")
+@login_required
+def medical_records():
+    """Show patient's medical records"""
+    user_id = session.get("user")
+    
+    # Get patient info
+    patient = Patient.query.filter_by(user_id=user_id).first()
+    
+    # Get all predictions for this patient
+    if patient:
+        predictions = Prediction.query.filter_by(patient_id=patient.id).order_by(Prediction.created_at.desc()).all()
+    else:
+        predictions = []
+    
+    return render_template("auth/medical_records.html", patient=patient, predictions=predictions)
+
+# ------------------- ADMIN LOGIN -------------------
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    """Separate admin login portal"""
+    if request.method == "POST":
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if user and check_password_hash(user.password, password):
+            # Check if user is admin or staff
+            if user.role not in ["admin", "staff"]:
+                flash("Admin/Staff access only!", "error")
+                return render_template("admin/login.html")
+            
+            # Store session
+            session["user"] = user.id
+            session["user_name"] = user.name
+            session["email"] = user.email
+            session["role"] = user.role
+            flash(f"Welcome {user.name}!", "success")
+            return redirect("/dashboard")
+        else:
+            flash("Invalid email or password!", "error")
+    
+    return render_template("admin/login.html")
+
+@app.route("/admin/logout")
+def admin_logout():
+    session.clear()
+    return redirect("/admin/login")
+
+# ------------------- FORGOT PASSWORD -------------------
+
+@app.route("/forgot_password", methods=["GET", "POST"])
+def forgot_password():
+    """Handle password reset requests"""
+    if request.method == "POST":
+        email = request.form["email"].lower().strip()
+        
+        user = User.query.filter_by(email=email).first()
+        
+        if user:
+            # Generate reset token
+            token = hashlib.sha256(f"{email}{datetime.now()}".encode()).hexdigest()[:32]
+            
+            # Delete any existing tokens for this user
+            PasswordReset.query.filter_by(user_id=user.id).delete()
+            
+            # Insert new token (expires in 24 hours)
+            expires = datetime.now() + timedelta(hours=24)
+            reset = PasswordReset(user_id=user.id, token=token, expires=expires)
+            db.session.add(reset)
+            db.session.commit()
+            
+            flash(f"Password reset link would be sent to {email}", "info")
+            flash("In a production environment, an email with reset instructions would be sent.", "success")
+        else:
+            # Don't reveal if email exists
+            flash("If this email exists in our system, reset instructions will be sent.", "info")
+        
+        return redirect("/login")
+    
+    return render_template("auth/forgot_password.html")
+
+@app.route("/reset_password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    """Handle password reset with token"""
+    
+    # Find valid token
+    reset = PasswordReset.query.filter_by(token=token, used=0).first()
+    
+    if not reset or reset.expires < datetime.now():
+        flash("Invalid or expired reset link!", "error")
+        return redirect("/forgot_password")
+    
+    if request.method == "POST":
+        password = request.form["password"]
+        confirm = request.form["confirm_password"]
+        
+        if password != confirm:
+            flash("Passwords do not match!", "error")
+            return render_template("auth/reset_password.html")
+        
+        if len(password) < 6:
+            flash("Password must be at least 6 characters", "error")
+            return render_template("auth/reset_password.html")
+        
+        # Update password
+        user = db.session.get(User, reset.user_id)
+        user.password = generate_password_hash(password)
+        
+        # Mark token as used
+        reset.used = 1
+        db.session.commit()
+        
+        flash("Password reset successful! Please login with your new password.", "success")
+        return redirect("/login")
+    
+    return render_template("auth/reset_password.html")
+
+# ------------------- ADMIN ROUTES -------------------
+
+@app.route("/admin/patients")
+@staff_required
+def admin_list_patients():
+    """List all patients (admin/staff only)"""
+    patients = Patient.query.join(User, Patient.user_id == User.id, isouter=True).order_by(Patient.created_at.desc()).all()
+    return render_template("admin/list_patients.html", patients=patients)
+
+@app.route("/admin/patients/add", methods=["GET", "POST"])
+@staff_required
+def admin_add_patient():
+    """Add a new patient (admin/staff only)"""
+    if request.method == "POST":
+        name = request.form["name"]
+        age = request.form.get("age")
+        gender = request.form.get("gender")
+
+        patient = Patient(name=name, age=age, gender=gender)
+        db.session.add(patient)
+        db.session.commit()
+        
+        flash("Patient added successfully!", "success")
+        return redirect("/admin/patients")
+
+    return render_template("admin/add_patients.html")
+
+@app.route("/admin/staff")
+@admin_required
+def admin_list_staff():
+    """List all staff (admin only)"""
+    staff = User.query.filter(User.role.in_(['staff', 'admin'])).order_by(User.created_at.desc()).all()
+    return render_template("admin/list_staff.html", staff=staff)
+
+@app.route("/admin/staff/add", methods=["GET", "POST"])
+@admin_required
+def admin_add_staff():
+    """Add a new staff member (admin only)"""
+    if request.method == "POST":
+        name = request.form["name"]
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        department = request.form.get("department", "")
+        position = request.form.get("position", "")
+        employee_id = request.form.get("employee_id", "")
+        
+        pw_hash = generate_password_hash(password)
+        
+        # Check if email exists
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            flash("Email already registered!", "error")
+            return render_template("admin/add_staff.html")
+        
+        user = User(name=name, email=email, password=pw_hash, role="staff")
+        db.session.add(user)
+        db.session.commit()
+        
+        # Create staff profile
+        staff_profile = StaffProfile(user_id=user.id, department=department, position=position, employee_id=employee_id)
+        db.session.add(staff_profile)
+        db.session.commit()
+        
+        flash("Staff added successfully!", "success")
+        return redirect("/admin/staff")
+    
+    return render_template("admin/add_staff.html")
+
+@app.route("/admin/predict", methods=["GET", "POST"])
+@staff_required
+def admin_predict():
+    """Make a prediction using the ML model (admin/staff only)"""
+    if request.method == "POST":
+        patient_id = request.form.get("patient_id")
+        symptoms = request.form.get("symptoms", "")
+        
+        # Check if image was uploaded
+        image = request.files.get('file')
+        
+        if not image:
+            flash("Please upload a cell image for analysis!", "error")
+            patients = Patient.query.order_by(Patient.name).all()
+            return render_template("admin/predict.html", patients=patients)
+        
+        # Save the uploaded image
+        filename = secure_filename(f"{patient_id}_{int(datetime.now().timestamp())}_{image.filename}")
+        image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        image.save(image_path)
+        
+        try:
+            # Get model path
+            model_path = os.path.join(os.path.dirname(__file__), 'malaria_model', 'malaria_cnn_model.keras')
+            
+            # Make prediction using the ML model
+            label, probability, malaria_score, no_malaria_score = predict_malaria(image_path, model_path)
+            
+            # Save prediction
+            staff_id = session.get("user")
+            staff_name = session.get("user_name")
+            
+            prediction = Prediction(
+                patient_id=patient_id,
+                staff_id=staff_id,
+                staff_name=staff_name,
+                result=label,
+                probability=probability,
+                malaria_score=malaria_score,
+                no_malaria_score=no_malaria_score,
+                symptoms=symptoms,
+                image_path=image_path
+            )
+            db.session.add(prediction)
+            db.session.commit()
+            
+            flash(f"Prediction complete: {label} ({probability:.1f}%)", "success" if label == "No Malaria" else "warning")
+            
+            prediction = Prediction.query.order_by(Prediction.id.desc()).first()
+            patient = db.session.get(Patient, patient_id)
+            
+            return render_template("admin/results.html", prediction=prediction, patient=patient)
+            
+        except Exception as e:
+            flash(f"Error making prediction: {str(e)}", "error")
+            patients = Patient.query.order_by(Patient.name).all()
+            return render_template("admin/predict.html", patients=patients)
+
+    patients = Patient.query.order_by(Patient.name).all()
+    return render_template("admin/predict.html", patients=patients)
+
+@app.route("/admin/results")
+@app.route("/admin/results/<int:prediction_id>")
+@staff_required
+def admin_results(prediction_id=None):
+    """View prediction results (admin/staff only)"""
+    if prediction_id:
+        prediction = db.session.get(Prediction, prediction_id)
+        patient = db.session.get(Patient, prediction.patient_id) if prediction else None
+        return render_template("admin/results.html", prediction=prediction, patient=patient)
+    
+    predictions = Prediction.query.join(Patient).order_by(Prediction.created_at.desc()).all()
+    return render_template("admin/results.html", predictions=predictions)
+
+# ------------------- RUN APP -------------------
+
 if __name__ == "__main__":
     app.run(debug=True)
