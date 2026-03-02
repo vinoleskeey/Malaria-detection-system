@@ -173,15 +173,20 @@ def is_developer():
 def send_password_reset_email(email, token):
     """Send password reset email to user"""
     try:
-        # Get base URL from request
-        with app.test_request_context():
-            base_url = url_for('index', _external=True).replace('/' + request.endpoint, '')
-            reset_link = f"{base_url}/reset_password/{token}"
+        print(f"[EMAIL] Starting password reset email for: {email}")
         
-        # For Railway, use environment variable or construct from request
-        if 'RAILWAY' in os.environ or 'WEB_URL' in os.environ:
-            base_url = os.environ.get('WEB_URL', 'https://web-production-e60045.up.railway.app')
-            reset_link = f"{base_url}/reset_password/{token}"
+        # Get base URL - try multiple sources
+        base_url = os.environ.get('WEB_URL')
+        if not base_url:
+            # Try to get from Railway env vars
+            base_url = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+            if base_url:
+                base_url = f"https://{base_url}"
+            else:
+                base_url = 'https://web-production-e60045.up.railway.app'
+        
+        reset_link = f"{base_url}/reset_password/{token}"
+        print(f"[EMAIL] Reset link: {reset_link}")
         
         # Create email message
         msg = MIMEMultipart()
@@ -222,7 +227,9 @@ def send_password_reset_email(email, token):
         
         return True
     except Exception as e:
-        print(f"Error sending email: {e}")
+        import traceback
+        print(f"[EMAIL ERROR] Failed to send email: {e}")
+        print(f"[EMAIL ERROR] Traceback: {traceback.format_exc()}")
         return False
 
 # ==================== ROUTES ====================
