@@ -5,6 +5,9 @@ from functools import wraps
 import os
 import secrets
 import hashlib
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import sys
@@ -32,6 +35,12 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DEVELOPER_EMAIL = 'victorshittu17@gmail.com'
+
+# Email Configuration
+MAIL_USERNAME = os.environ.get('MAIL_USERNAME', 'victorshittu17@gmail.com')
+MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', 'ifyg knbp oxbv izpk')
+MAIL_HOST = 'smtp.gmail.com'
+MAIL_PORT = 587
 
 # ==================== SQLALCHEMY SETUP ====================
 db = SQLAlchemy(app)
@@ -158,6 +167,63 @@ def admin_required(f):
 
 def is_developer():
     return session.get('email') == DEVELOPER_EMAIL
+
+# ==================== EMAIL HELPERS ====================
+
+def send_password_reset_email(email, token):
+    """Send password reset email to user"""
+    try:
+        # Get base URL from request
+        with app.test_request_context():
+            base_url = url_for('index', _external=True).replace('/' + request.endpoint, '')
+            reset_link = f"{base_url}/reset_password/{token}"
+        
+        # For Railway, use environment variable or construct from request
+        if 'RAILWAY' in os.environ or 'WEB_URL' in os.environ:
+            base_url = os.environ.get('WEB_URL', 'https://web-production-e60045.up.railway.app')
+            reset_link = f"{base_url}/reset_password/{token}"
+        
+        # Create email message
+        msg = MIMEMultipart()
+        msg['From'] = MAIL_USERNAME
+        msg['To'] = email
+        msg['Subject'] = 'Password Reset - Malaria Detection System'
+        
+        # Email body
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #f5f5f5; padding: 30px; border-radius: 10px;">
+                <h2 style="color: #1a237e;">Password Reset Request</h2>
+                <p>You requested a password reset for your Malaria Detection System account.</p>
+                <p>Click the button below to reset your password:</p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{reset_link}" style="background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; display: inline-block;">Reset Password</a>
+                </div>
+                <p>Or copy and paste this link in your browser:</p>
+                <p style="word-break: break-all; color: #0d47a1;">{reset_link}</p>
+                <p style="color: #666; font-size: 14px;">This link will expire in 24 hours.</p>
+                <p style="color: #666; font-size: 14px;">If you didn't request this password reset, please ignore this email.</p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(body, 'html'))
+        
+        # Connect to Gmail SMTP server
+        server = smtplib.SMTP(MAIL_HOST, MAIL_PORT)
+        server.starttls()
+        server.login(MAIL_USERNAME, MAIL_PASSWORD)
+        
+        # Send email
+        server.sendmail(MAIL_USERNAME, email, msg.as_string())
+        server.quit()
+        
+        return True
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        return False
 
 # ==================== ROUTES ====================
 
@@ -502,8 +568,14 @@ def forgot_password():
             db.session.add(reset)
             db.session.commit()
             
-            flash(f"Password reset link would be sent to {email}", "info")
-            flash("In a production environment, an email with reset instructions would be sent.", "success")
+            # Try to send the email
+            email_sent = send_password_reset_email(email, token)
+            
+            if email_sent:
+                flash(f"Password reset link sent to {email}! Please check your inbox.", "success")
+            else:
+                # Still show success to not reveal if email exists
+                flash("If this email exists in our system, reset instructions will be sent.", "info")
         else:
             # Don't reveal if email exists
             flash("If this email exists in our system, reset instructions will be sent.", "info")
@@ -569,69 +641,6 @@ def admin_add_patient():
         patient = Patient(name=name, age=age, gender=gender)
         db.session.add(patient)
         db.session.commit()
-        
-        flash("Patient added successfully!", "success")
-        return redirect("/admin/patients")
-
-    return render_template("admin/add_patients.html")
-
-@app.route("/admin/staff")
-@admin_required
-def admin_list_staff():
-    """List all staff (admin only)"""
-    staff = User.query.filter(User.role.in_(['staff', 'admin'])).order_by(User.created_at.desc()).all()
-    return render_template("admin/list_staff.html", staff=staff)
-
-@app.route("/admin/staff/add", methods=["GET", "POST"])
-@admin_required
-def admin_add_staff():
-    """Add a new staff member (admin only)"""
-    if request.method == "POST":
-        name = request.form["name"]
-        email = request.form["email"].lower().strip()
-        password = request.form["password"]
-        department = request.form.get("department", "")
-        position = request.form.get("position", "")
-        employee_id = request.form.get("employee_id", "")
-        
-        pw_hash = generate_password_hash(password)
-        
-        # Check if email exists
-        existing_user = User.query.filter_by(email=email).first()
-        if existing_user:
-            flash("Email already registered!", "error")
-            return render_template("admin/add_staff.html")
-        
-        user = User(name=name, email=email, password=pw_hash, role="staff")
-        db.session.add(user)
-        db.session.commit()
-        
-        # Create staff profile
-        staff_profile = StaffProfile(user_id=user.id, department=department, position=position, employee_id=employee_id)
-        db.session.add(staff_profile)
-        db.session.commit()
-        
-        flash("Staff added successfully!", "success")
-        return redirect("/admin/staff")
-    
-    return render_template("admin/add_staff.html")
-
-@app.route("/admin/predict", methods=["GET", "POST"])
-@staff_required
-def admin_predict():
-    """Make a prediction using the ML model (admin/staff only)"""
-    if request.method == "POST":
-        patient_id = request.form.get("patient_id")
-        symptoms = request.form.get("symptoms", "")
-        
-        # Check if image was uploaded
-        image = request.files.get('file')
-        
-        if not image:
-            flash("Please upload a cell image for analysis!", "error")
-            patients = Patient.query.order_by(Patient.name).all()
-            return render_template("admin/predict.html", patients=patients)
-        
         # Save the uploaded image
         filename = secure_filename(f"{patient_id}_{int(datetime.now().timestamp())}_{image.filename}")
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
