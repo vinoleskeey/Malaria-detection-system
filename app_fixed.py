@@ -38,9 +38,13 @@ DEVELOPER_EMAIL = 'victorshittu17@gmail.com'
 
 # Email Configuration
 MAIL_USERNAME = os.environ.get('MAIL_USERNAME', 'victorshittu17@gmail.com')
-MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', 'ifyg knbp oxbv izpk')
+MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', 'ifygknbpoxbvizpk')
 MAIL_HOST = 'smtp.gmail.com'
 MAIL_PORT = 587
+
+# Debug: Print mail config (without exposing password)
+print(f"[DEBUG] MAIL_USERNAME: {MAIL_USERNAME}")
+print(f"[DEBUG] MAIL_PASSWORD length: {len(MAIL_PASSWORD) if MAIL_PASSWORD else 0}")
 
 # ==================== SQLALCHEMY SETUP ====================
 db = SQLAlchemy(app)
