@@ -25,7 +25,7 @@
     },
     "MAIL_PASSWORD": {
       "description": "Your Gmail app password for password reset emails",
-      "value": "ifyg knbp oxbv izpk"
+      "value": "ifygknbpoxbvizpk"
     },
     "WEB_URL": {
       "description": "Your Railway app URL for password reset links",
