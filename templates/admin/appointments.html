@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block header %}Appointment Requests{% endblock %}
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; flex-wrap: wrap; gap: 15px;">
+    <h3 style="color: white; margin: 0;"><i class="fas fa-calendar-alt"></i> Appointment Requests</h3>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="/admin/appointments" class="badge {% if not status_filter %}badge-success{% else %}badge-info{% endif %}" style="text-decoration: none;">All</a>
+        <a href="/admin/appointments?status=pending" class="badge {% if status_filter == 'pending' %}badge-success{% else %}badge-warning{% endif %}" style="text-decoration: none;">Pending</a>
+        <a href="/admin/appointments?status=confirmed" class="badge {% if status_filter == 'confirmed' %}badge-success{% else %}badge-info{% endif %}" style="text-decoration: none;">Confirmed</a>
+        <a href="/admin/appointments?status=completed" class="badge {% if status_filter == 'completed' %}badge-success{% else %}badge-info{% endif %}" style="text-decoration: none;">Completed</a>
+        <a href="/admin/appointments?status=cancelled" class="badge {% if status_filter == 'cancelled' %}badge-success{% else %}badge-danger{% endif %}" style="text-decoration: none;">Cancelled</a>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">
+                <i class="fas fa-info-circle"></i> {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+{% if appointments %}
+<table>
+    <tr>
+        <th><i class="fas fa-user"></i> Patient</th>
+        <th><i class="fas fa-envelope"></i> Booked By</th>
+        <th><i class="fas fa-calendar-day"></i> Date</th>
+        <th><i class="fas fa-clock"></i> Time</th>
+        <th><i class="fas fa-stethoscope"></i> Reason</th>
+        <th><i class="fas fa-comment-medical"></i> Notes</th>
+        <th><i class="fas fa-info-circle"></i> Status</th>
+        <th><i class="fas fa-cog"></i> Update</th>
+    </tr>
+    {% for a in appointments %}
+    <tr>
+        <td>{{ a.patient.name if a.patient else 'Unknown' }}</td>
+        <td>{{ a.booked_by.name if a.booked_by else 'Unknown' }}</td>
+        <td>{{ a.preferred_date.strftime('%Y-%m-%d') if a.preferred_date else 'N/A' }}</td>
+        <td>{{ a.preferred_time }}</td>
+        <td>{{ a.reason or 'Malaria test' }}</td>
+        <td>{{ a.notes or '-' }}</td>
+        <td>
+            {% if a.status == 'confirmed' %}
+            <span class="badge badge-success"><i class="fas fa-check-circle"></i> Confirmed</span>
+            {% elif a.status == 'cancelled' %}
+            <span class="badge badge-danger"><i class="fas fa-times-circle"></i> Cancelled</span>
+            {% elif a.status == 'completed' %}
+            <span class="badge badge-info"><i class="fas fa-flag-checkered"></i> Completed</span>
+            {% else %}
+            <span class="badge badge-warning"><i class="fas fa-hourglass-half"></i> Pending</span>
+            {% endif %}
+        </td>
+        <td>
+            <form method="post" action="/admin/appointments/{{ a.id }}/update" style="display: flex; gap: 6px; align-items: center;">
+                <select name="status" style="padding: 8px 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: 'Poppins', sans-serif;">
+                    <option value="pending" {% if a.status == 'pending' %}selected{% endif %}>Pending</option>
+                    <option value="confirmed" {% if a.status == 'confirmed' %}selected{% endif %}>Confirmed</option>
+                    <option value="completed" {% if a.status == 'completed' %}selected{% endif %}>Completed</option>
+                    <option value="cancelled" {% if a.status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                </select>
+                <button type="submit" class="btn btn-primary" style="padding: 8px 14px;">
+                    <i class="fas fa-save"></i>
+                </button>
+            </form>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div style="text-align: center; padding: 50px; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+    <i class="fas fa-calendar-times" style="font-size: 60px; color: #b2dfdb; margin-bottom: 20px;"></i>
+    <h3 style="color: #00796b; margin-bottom: 10px;">No Appointment Requests</h3>
+    <p style="color: #666;">
+        {% if status_filter %}No appointments with status "{{ status_filter }}".{% else %}No appointment requests have been submitted yet.{% endif %}
+    </p>
+</div>
+{% endif %}
+
+{% endblock %}

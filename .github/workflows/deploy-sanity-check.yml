@@ -1,0 +1,66 @@
+name: Deploy sanity check
+
+# Catches exactly the class of bug that twice made it past local testing this
+# project: a package imported by shipped code (tensorflow, faster-whisper)
+# but never listed in requirements.txt, which only fails once something on
+# Railway actually calls the code path that needs it. Runs on GitHub's real
+# Ubuntu runners - the same OS family Railway builds on - so wheel
+# availability and version resolution here are meaningful, not guessed.
+#
+# This is NOT a full test suite: it doesn't start Ollama, doesn't hit a live
+# server, and doesn't touch a real database. It answers one narrow, high-value
+# question - "does `pip install -r requirements.txt` succeed, and does the
+# app import and initialize without crashing?" - on Linux, on the exact
+# Python version Railway will actually use (runtime.txt).
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  sanity-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read Python version from runtime.txt
+        id: pyver
+        run: |
+          # runtime.txt is "python-3.11.7" (Heroku/Railway convention) - extract "3.11.7"
+          version=$(cut -d- -f2 runtime.txt)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python (matching runtime.txt, matching Railway)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.pyver.outputs.version }}
+
+      - name: Install PostgreSQL client headers
+        # Needed for psycopg2-binary's build step in some environments; the
+        # binary wheel is normally used directly, this is just a safety net.
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check for dependency conflicts
+        run: pip check
+
+      - name: Import the app and run its startup path
+        # Mirrors what actually happens when gunicorn imports app_fixed:app -
+        # module-level code runs, including db.create_all() and the default-
+        # admin bootstrap. No DATABASE_URL is set, so this uses a throwaway
+        # local SQLite file, not any real database.
+        run: python -c "import app_fixed; print('app_fixed imported and initialized OK')"
+
+      - name: Confirm the ML and voice dependencies actually import
+        # These are exactly the two packages that were silently missing from
+        # requirements.txt despite being used by shipped code - importing
+        # them directly here (not just letting pip install them) is the real
+        # regression check.
+        run: |
+          python -c "from tensorflow.keras.models import load_model; print('tensorflow.keras OK')"
+          python -c "from faster_whisper import WhisperModel; print('faster_whisper OK')"

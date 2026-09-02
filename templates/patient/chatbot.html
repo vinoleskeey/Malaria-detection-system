@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Malaria AI Health Assistant</title>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/chatbot.css') }}" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" aria-label="Chat sidebar">
+      <div class="sidebar__top">
+        <div class="brand">
+          <div class="brand__icon" aria-hidden="true">🩺</div>
+          <div class="brand__text">
+            <div class="brand__title">Malaria AI</div>
+            <div class="brand__subtitle">AI Health Assistant</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar__section">
+        <div class="sidebar__heading">Chats</div>
+        <button class="btn btn--ghost btn--full" id="btnNewChat" type="button" title="Clear current chat">New chat</button>
+        <button class="btn btn--ghost btn--full" id="btnClearHistory" type="button" title="Clear chat history">Clear history</button>
+      </div>
+
+      <div class="sidebar__section">
+        <div class="sidebar__heading">Preferences</div>
+        <div class="toggleRow">
+          <span>Dark mode</span>
+          <label class="switch">
+            <input type="checkbox" id="themeToggle" />
+            <span class="slider round"></span>
+          </label>
+        </div>
+        <div class="toggleRow" style="margin-top: 12px;">
+          <span>Read replies aloud</span>
+          <label class="switch">
+            <input type="checkbox" id="autoReadToggle" />
+            <span class="slider round"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sidebar__footer">
+        <div class="hint">Patient portal chat • Local Ollama</div>
+      </div>
+    </aside>
+
+    <main class="main" role="main">
+      <header class="topbar" aria-label="Chat header">
+        <div class="topbar__left">
+          <div class="pill">Patient AI Health Assistant</div>
+        </div>
+        <div class="topbar__right">
+          <button class="iconBtn" id="btnCopy" type="button" title="Copy last AI response">
+            <span aria-hidden="true">⧉</span>
+          </button>
+          <button class="iconBtn" id="btnRetry" type="button" title="Retry last message">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="chat" aria-label="Chat messages">
+        <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
+
+        <div id="typing" class="typing hidden" aria-live="polite" aria-atomic="true">
+          <div class="typing__dots" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="typing__text">AI is thinking<span class="dotsAnim">…</span></div>
+        </div>
+      </section>
+
+      <footer class="composer" aria-label="Chat composer">
+        <div class="composer__inner">
+          <textarea
+            id="messageInput"
+            class="composer__textarea"
+            rows="1"
+            maxlength="2000"
+            placeholder="Describe your symptoms or questions..."
+          ></textarea>
+
+          <div class="composer__actions">
+            <button class="iconBtn" id="btnMic" type="button" title="Record a voice message" aria-label="Record a voice message">
+              <span aria-hidden="true">🎤</span>
+            </button>
+            <button class="btn btn--primary" id="sendBtn" type="button">Send</button>
+          </div>
+        </div>
+
+        <div id="voiceMsg" class="voiceMsg hidden" role="status" aria-live="polite"></div>
+
+        <div class="composer__meta">
+          <span class="kbd">Enter</span> send • <span class="kbd">Shift</span>+<span class="kbd">Enter</span> new line • <span class="kbd">🎤</span> tap to record, tap again to stop
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/chatbot.js') }}"></script>
+</body>
+</html>
+

@@ -19,6 +19,8 @@ database.db
 htmlcov/
 *.log
 .DS_Store
+# Local credentialed test files should never be committed
+test_staff_routes.py
 
 # Exclude specific files in malaria_model but keep the directory
 malaria_model/.venv/

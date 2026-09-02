@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request, redirect, session, flash, url_for
+from flask import Flask, render_template, request, redirect, session, flash, url_for, send_from_directory
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from functools import wraps
 import os
 import secrets
@@ -8,9 +9,21 @@ import hashlib
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask_sqlalchemy import SQLAlchemy
+from models import db
 from datetime import datetime, timedelta
 import sys
+import importlib.util
+
+# Ollama chat blueprint (POST /chat, POST /chat/stream, GET /history, POST /clear).
+# Imported at module level (mirrors app.py) so it registers below, after
+# db.init_app(app) and the default-admin bootstrap.
+from routes.chat import chat_bp
+
+# Load environment variables from .env for local development (mirrors app.py).
+# In production (Railway) real env vars are already set, so this is a no-op there.
+if importlib.util.find_spec('dotenv') is not None:
+    dotenv = importlib.import_module('dotenv')
+    dotenv.load_dotenv()
 
 # Add malaria_model to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'malaria_model'))
@@ -27,7 +40,24 @@ app.config['SESSION_COOKIE_SECURE'] = False
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+
+# Railway terminates TLS at a proxy and forwards the original scheme/host in
+# X-Forwarded-* headers. Trust one proxy hop so url_for(..., _external=True)
+# builds correct https:// links (used in the password-reset email). No-op locally.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+if os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RAILWAY_PUBLIC_DOMAIN'):
+    app.config['PREFERRED_URL_SCHEME'] = 'https'
+# Use DATABASE_URL from Railway environment, fallback to SQLite for local
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Railway provides postgres:// but SQLAlchemy needs postgresql://
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    print(f"[DEBUG] Using Railway PostgreSQL database")
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
+    print(f"[DEBUG] Using local SQLite database")
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
@@ -36,18 +66,24 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 DEVELOPER_EMAIL = 'victorshittu17@gmail.com'
 
-# Email Configuration
-MAIL_USERNAME = os.environ.get('MAIL_USERNAME', 'victorshittu17@gmail.com')
-MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', 'ifygknbpoxbvizpk')
-MAIL_HOST = 'smtp.gmail.com'
-MAIL_PORT = 587
+# Email / SMTP configuration - read entirely from the environment, no secrets in
+# source. Set SMTP_USERNAME and SMTP_PASSWORD (Railway dashboard / local .env).
+# MAIL_USERNAME / MAIL_PASSWORD are accepted as fallbacks for backward compat.
+SMTP_HOST = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
+SMTP_PORT = int(os.environ.get('SMTP_PORT', '587'))
+SMTP_USERNAME = os.environ.get('SMTP_USERNAME') or os.environ.get('MAIL_USERNAME', '')
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD') or os.environ.get('MAIL_PASSWORD', '')
+SMTP_FROM_EMAIL = os.environ.get('SMTP_FROM_EMAIL') or SMTP_USERNAME
 
-# Debug: Print mail config (without exposing password)
-print(f"[DEBUG] MAIL_USERNAME: {MAIL_USERNAME}")
-print(f"[DEBUG] MAIL_PASSWORD length: {len(MAIL_PASSWORD) if MAIL_PASSWORD else 0}")
+print(f"[DEBUG] SMTP_USERNAME set: {bool(SMTP_USERNAME)}")
+print(f"[DEBUG] SMTP_PASSWORD set: {bool(SMTP_PASSWORD)}")
 
 # ==================== SQLALCHEMY SETUP ====================
-db = SQLAlchemy(app)
+# `db` is the shared SQLAlchemy() instance from models/__init__.py, not a private
+# one - routes/chat.py's ChatMessage/ChatSession models are bound to that same
+# instance, so this app must call init_app() on it rather than constructing its
+# own SQLAlchemy(app) (which would leave chat's tables never created here).
+db.init_app(app)
 
 # ==================== MODELS ====================
 
@@ -115,19 +151,44 @@ class PasswordReset(db.Model):
     used = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class Appointment(db.Model):
+    __tablename__ = 'appointments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    preferred_date = db.Column(db.Date, nullable=False)
+    preferred_time = db.Column(db.String(20), nullable=False)  # Morning/Afternoon/Evening
+    reason = db.Column(db.String(200), default="Malaria test")
+    notes = db.Column(db.Text)
+    status = db.Column(db.String(20), default="pending")  # pending/confirmed/cancelled/completed
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    patient = db.relationship('Patient', backref='appointments')
+    booked_by = db.relationship('User', backref='booked_appointments')
+
 # Create all tables and default admin account
 with app.app_context():
     db.create_all()
     
-    # Add image_path column if it doesn't exist (migration)
+    # Add image_path column if it doesn't exist (migration) - PostgreSQL compatible
     try:
         from sqlalchemy import text
-        result = db.session.execute(text("PRAGMA table_info(predictions)"))
-        columns = [row[1] for row in result]
-        if 'image_path' not in columns:
-            db.session.execute(text("ALTER TABLE predictions ADD COLUMN image_path VARCHAR(200)"))
-            db.session.commit()
-            print("Added image_path column to predictions table")
+        # Check if column exists using PostgreSQL-compatible query
+        try:
+            result = db.session.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='predictions' AND column_name='image_path'"))
+            if result.fetchone() is None:
+                db.session.execute(text("ALTER TABLE predictions ADD COLUMN image_path VARCHAR(200)"))
+                db.session.commit()
+                print("Added image_path column to predictions table")
+        except:
+            # For SQLite (local dev)
+            result = db.session.execute(text("PRAGMA table_info(predictions)"))
+            columns = [row[1] for row in result]
+            if 'image_path' not in columns:
+                db.session.execute(text("ALTER TABLE predictions ADD COLUMN image_path VARCHAR(200)"))
+                db.session.commit()
+                print("Added image_path column to predictions table")
     except Exception as e:
         print(f"Migration check: {e}")
     
@@ -139,6 +200,9 @@ with app.app_context():
         db.session.add(admin)
         db.session.commit()
         print("Admin account created!")
+
+# Register Ollama chat blueprint (POST /chat, POST /chat/stream, GET /history, POST /clear)
+app.register_blueprint(chat_bp)
 
 # ==================== DECORATORS ====================
 def login_required(f):
@@ -172,29 +236,44 @@ def admin_required(f):
 def is_developer():
     return session.get('email') == DEVELOPER_EMAIL
 
+# ==================== TEMPLATE CONTEXT ====================
+
+@app.context_processor
+def inject_pending_appointments():
+    """Expose the number of pending appointment requests to templates.
+
+    Only runs the query for staff/admin sessions (and not while an admin is
+    viewing as a patient). Recomputed on every request, so the badge/count
+    never goes stale after a status change.
+    """
+    role = session.get("role")
+    if role in ("staff", "admin") and not session.get("viewing_as_patient"):
+        try:
+            count = Appointment.query.filter_by(status="pending").count()
+        except Exception:
+            count = 0
+        return {"pending_appointments_count": count}
+    return {"pending_appointments_count": 0}
+
 # ==================== EMAIL HELPERS ====================
 
-def send_password_reset_email(email, token):
-    """Send password reset email to user"""
+def send_password_reset_email(email, reset_link):
+    """Send password reset email to user.
+
+    `reset_link` must be a fully-qualified URL - the route builds it with
+    url_for("reset_password", token=token, _external=True) so it uses the real
+    deployed host and (via ProxyFix) the https scheme.
+    """
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        print("[EMAIL ERROR] SMTP_USERNAME / SMTP_PASSWORD not set in environment")
+        return False
     try:
         print(f"[EMAIL] Starting password reset email for: {email}")
-        
-        # Get base URL - try multiple sources
-        base_url = os.environ.get('WEB_URL')
-        if not base_url:
-            # Try to get from Railway env vars
-            base_url = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
-            if base_url:
-                base_url = f"https://{base_url}"
-            else:
-                base_url = 'https://web-production-e60045.up.railway.app'
-        
-        reset_link = f"{base_url}/reset_password/{token}"
         print(f"[EMAIL] Reset link: {reset_link}")
-        
+
         # Create email message
         msg = MIMEMultipart()
-        msg['From'] = MAIL_USERNAME
+        msg['From'] = SMTP_FROM_EMAIL
         msg['To'] = email
         msg['Subject'] = 'Password Reset - Malaria Detection System'
         
@@ -219,16 +298,16 @@ def send_password_reset_email(email, token):
         """
         
         msg.attach(MIMEText(body, 'html'))
-        
-        # Connect to Gmail SMTP server
-        server = smtplib.SMTP(MAIL_HOST, MAIL_PORT)
+
+        # Connect to SMTP server
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
         server.starttls()
-        server.login(MAIL_USERNAME, MAIL_PASSWORD)
-        
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+
         # Send email
-        server.sendmail(MAIL_USERNAME, email, msg.as_string())
+        server.sendmail(SMTP_FROM_EMAIL, email, msg.as_string())
         server.quit()
-        
+
         return True
     except Exception as e:
         import traceback
@@ -241,6 +320,17 @@ def send_password_reset_email(email, token):
 @app.route("/")
 def index():
     return redirect("/login")
+
+@app.route("/chatbot", methods=["GET"])
+@login_required
+def chatbot():
+    # Patient portal chatbot (education only)
+    # Ensure staff/admin cannot open it via URL
+    if session.get("role") not in ["patient"] and not session.get("viewing_as_patient"):
+        flash("Access denied", "error")
+        return redirect("/dashboard")
+
+    return render_template("patient/chatbot.html")
 
 # ------------------- AUTH -------------------
 
@@ -390,7 +480,9 @@ def admin_dashboard():
     
     # Get all staff for switching
     all_staff = User.query.filter(User.role.in_(['staff', 'admin'])).all()
-    
+
+    pending_appointments_count = Appointment.query.filter_by(status="pending").count()
+
     return render_template("admin/dashboard.html",
                            total_patients=total_patients,
                            total_predictions=total_predictions,
@@ -400,6 +492,7 @@ def admin_dashboard():
                            metrics={"accuracy": 96.5, "precision": 95.8, "recall": 97.2, "f1_score": 96.5},
                            all_patients=all_patients,
                            all_staff=all_staff,
+                           pending_appointments_count=pending_appointments_count,
                            is_admin=True)
 
 @app.route("/patient/dashboard")
@@ -522,7 +615,168 @@ def medical_records():
     
     return render_template("auth/medical_records.html", patient=patient, predictions=predictions)
 
+# ------------------- APPOINTMENTS (Patient) -------------------
+
+@app.route("/book-appointment", methods=["GET", "POST"])
+@login_required
+def book_appointment():
+    user_id = session.get("user")
+    role = session.get("role")
+
+    if role != "patient" and not session.get("viewing_as_patient"):
+        flash("Only patients can book appointments", "error")
+        return redirect("/dashboard")
+
+    patient = Patient.query.filter_by(user_id=user_id).first()
+    default_name = (session.get("user_name") or "").strip()
+
+    def render_form():
+        # Self-registered patients have no Patient row yet; the template shows
+        # extra name/age/gender fields when has_patient_profile is False.
+        return render_template(
+            "patient/book_appointment.html",
+            has_patient_profile=patient is not None,
+            default_name=default_name,
+        )
+
+    if request.method == "POST":
+        date_str = request.form.get("preferred_date", "")
+        time_slot = request.form.get("preferred_time", "")
+        reason = request.form.get("reason", "Malaria test").strip() or "Malaria test"
+        notes = request.form.get("notes", "").strip()
+
+        try:
+            preferred_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            flash("Please choose a valid date.", "error")
+            return render_form()
+
+        if preferred_date < datetime.now().date():
+            flash("Please choose a date in the future.", "error")
+            return render_form()
+
+        if time_slot not in ("Morning", "Afternoon", "Evening"):
+            flash("Please choose a valid time of day.", "error")
+            return render_form()
+
+        # No linked Patient profile yet (e.g. self-registered via /register) -
+        # collect basic info inline and create the Patient row first.
+        if not patient:
+            new_name = (request.form.get("patient_name", "") or "").strip() or default_name
+            age_raw = (request.form.get("patient_age", "") or "").strip()
+            gender = (request.form.get("patient_gender", "") or "").strip()
+
+            if not new_name:
+                flash("Please enter your name to set up your patient profile.", "error")
+                return render_form()
+
+            age = None
+            if age_raw:
+                try:
+                    age = int(age_raw)
+                except ValueError:
+                    flash("Age must be a whole number.", "error")
+                    return render_form()
+                if age <= 0:
+                    flash("Age must be a positive number.", "error")
+                    return render_form()
+
+            patient = Patient(user_id=user_id, name=new_name, age=age, gender=gender or None)
+            db.session.add(patient)
+            db.session.commit()
+
+        appointment = Appointment(
+            patient_id=patient.id,
+            user_id=user_id,
+            preferred_date=preferred_date,
+            preferred_time=time_slot,
+            reason=reason,
+            notes=notes,
+        )
+        db.session.add(appointment)
+        db.session.commit()
+
+        flash("Appointment request submitted! We'll confirm it shortly.", "success")
+        return redirect("/my-appointments")
+
+    return render_form()
+
+@app.route("/my-appointments")
+@login_required
+def my_appointments():
+    user_id = session.get("user")
+    patient = Patient.query.filter_by(user_id=user_id).first()
+
+    appointments = (
+        Appointment.query.filter_by(patient_id=patient.id)
+        .order_by(Appointment.preferred_date.desc())
+        .all()
+        if patient
+        else []
+    )
+
+    return render_template("patient/my_appointments.html", appointments=appointments)
+
+# ------------------- APPOINTMENTS (Staff/Admin) -------------------
+
+@app.route("/admin/appointments")
+@staff_required
+def admin_appointments():
+    status_filter = request.args.get("status")
+
+    query = Appointment.query.join(Patient)
+    if status_filter:
+        query = query.filter(Appointment.status == status_filter)
+
+    appointments = query.order_by(Appointment.preferred_date.asc()).all()
+    return render_template("admin/appointments.html", appointments=appointments, status_filter=status_filter)
+
+@app.route("/admin/appointments/<int:appointment_id>/update", methods=["POST"])
+@staff_required
+def admin_update_appointment(appointment_id):
+    appointment = db.session.get(Appointment, appointment_id)
+    new_status = request.form.get("status")
+
+    if appointment and new_status in ("pending", "confirmed", "cancelled", "completed"):
+        appointment.status = new_status
+        db.session.commit()
+        flash(f"Appointment status updated to {new_status}.", "success")
+    else:
+        flash("Could not update appointment.", "error")
+
+    return redirect("/admin/appointments")
+
 # ------------------- ADMIN LOGIN -------------------
+
+@app.route("/admin/register", methods=["GET", "POST"])
+def admin_register():
+    if request.method == "POST":
+        name = request.form["name"]
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        confirm = request.form.get("confirm_password", "")
+
+        if password != confirm:
+            flash("Passwords do not match!", "error")
+            return render_template("admin/register.html")
+
+        if len(password) < 6:
+            flash("Password must be at least 6 characters", "error")
+            return render_template("admin/register.html")
+
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            flash("Email already registered!", "error")
+            return render_template("admin/register.html")
+
+        user = User(name=name, email=email, password=generate_password_hash(password), role="admin")
+        db.session.add(user)
+        db.session.commit()
+
+        flash("Admin account created! Please login.", "success")
+        return redirect("/admin/login")
+
+    return render_template("admin/register.html")
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
@@ -568,19 +822,23 @@ def forgot_password():
         
         if user:
             # Generate reset token
-            token = hashlib.sha256(f"{email}{datetime.now()}".encode()).hexdigest()[:32]
-            
+            token = hashlib.sha256(f"{email}{datetime.utcnow()}".encode()).hexdigest()[:32]
+
             # Delete any existing tokens for this user
             PasswordReset.query.filter_by(user_id=user.id).delete()
-            
-            # Insert new token (expires in 24 hours)
-            expires = datetime.now() + timedelta(hours=24)
+
+            # Insert new token (expires in 24 hours, UTC)
+            expires = datetime.utcnow() + timedelta(hours=24)
             reset = PasswordReset(user_id=user.id, token=token, expires=expires)
             db.session.add(reset)
             db.session.commit()
-            
+
+            # Build a fully-qualified reset URL from the current request
+            # (ProxyFix -> correct https:// + host on Railway).
+            reset_link = url_for("reset_password", token=token, _external=True)
+
             # Try to send the email
-            email_sent = send_password_reset_email(email, token)
+            email_sent = send_password_reset_email(email, reset_link)
             
             if email_sent:
                 flash(f"Password reset link sent to {email}! Please check your inbox.", "success")
@@ -601,14 +859,14 @@ def reset_password(token):
     
     # Find valid token
     reset = PasswordReset.query.filter_by(token=token, used=0).first()
-    
-    if not reset or reset.expires < datetime.now():
+
+    if not reset or reset.expires < datetime.utcnow():
         flash("Invalid or expired reset link!", "error")
         return redirect("/forgot_password")
-    
+
     if request.method == "POST":
-        password = request.form["password"]
-        confirm = request.form["confirm_password"]
+        password = request.form.get("password") or request.form.get("new_password", "")
+        confirm = request.form.get("confirm_password", "")
         
         if password != confirm:
             flash("Passwords do not match!", "error")
@@ -652,22 +910,82 @@ def admin_add_patient():
         patient = Patient(name=name, age=age, gender=gender)
         db.session.add(patient)
         db.session.commit()
+
+        flash("Patient added successfully!", "success")
+        return redirect("/admin/patients")
+
+    return render_template("admin/add_patients.html")
+
+@app.route("/admin/staff")
+@admin_required
+def admin_list_staff():
+    """List all staff/admin accounts (admin only)"""
+    staff = User.query.filter(User.role.in_(['staff', 'admin'])).order_by(User.created_at.desc()).all()
+    return render_template("admin/list_staff.html", staff=staff)
+
+@app.route("/admin/staff/add", methods=["GET", "POST"])
+@admin_required
+def admin_add_staff():
+    """Add a new staff/admin account (admin only)"""
+    if request.method == "POST":
+        name = request.form["name"]
+        email = request.form["email"].lower().strip()
+        password = request.form["password"]
+        department = request.form.get("department", "")
+        position = request.form.get("position", "")
+        employee_id = request.form.get("employee_id", "")
+
+        pw_hash = generate_password_hash(password)
+
+        existing_user = User.query.filter_by(email=email).first()
+        if existing_user:
+            flash("Email already registered!", "error")
+            return render_template("admin/add_staff.html")
+
+        user = User(name=name, email=email, password=pw_hash, role="staff")
+        db.session.add(user)
+        db.session.commit()
+
+        staff_profile = StaffProfile(user_id=user.id, department=department, position=position, employee_id=employee_id)
+        db.session.add(staff_profile)
+        db.session.commit()
+
+        flash("Staff added successfully!", "success")
+        return redirect("/admin/staff")
+
+    return render_template("admin/add_staff.html")
+
+@app.route("/admin/predict", methods=["GET", "POST"])
+@staff_required
+def admin_predict():
+    """Run malaria detection on an uploaded cell image (admin/staff only)"""
+    if request.method == "POST":
+        patient_id = request.form.get("patient_id")
+        symptoms = request.form.get("symptoms", "")
+
+        image = request.files.get('file')
+
+        if not image:
+            flash("Please upload a cell image for analysis!", "error")
+            patients = Patient.query.order_by(Patient.name).all()
+            return render_template("admin/predict.html", patients=patients)
+
         # Save the uploaded image
         filename = secure_filename(f"{patient_id}_{int(datetime.now().timestamp())}_{image.filename}")
         image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         image.save(image_path)
-        
+
         try:
             # Get model path
             model_path = os.path.join(os.path.dirname(__file__), 'malaria_model', 'malaria_cnn_model.keras')
-            
+
             # Make prediction using the ML model
             label, probability, malaria_score, no_malaria_score = predict_malaria(image_path, model_path)
-            
+
             # Save prediction
             staff_id = session.get("user")
             staff_name = session.get("user_name")
-            
+
             prediction = Prediction(
                 patient_id=patient_id,
                 staff_id=staff_id,
@@ -681,14 +999,14 @@ def admin_add_patient():
             )
             db.session.add(prediction)
             db.session.commit()
-            
+
             flash(f"Prediction complete: {label} ({probability:.1f}%)", "success" if label == "No Malaria" else "warning")
-            
-            prediction = Prediction.query.order_by(Prediction.id.desc()).first()
+
+            prediction_row = Prediction.query.order_by(Prediction.id.desc()).first()
             patient = db.session.get(Patient, patient_id)
-            
-            return render_template("admin/results.html", prediction=prediction, patient=patient)
-            
+
+            return render_template("admin/results.html", prediction=prediction_row, patient=patient)
+
         except Exception as e:
             flash(f"Error making prediction: {str(e)}", "error")
             patients = Patient.query.order_by(Patient.name).all()
@@ -696,6 +1014,12 @@ def admin_add_patient():
 
     patients = Patient.query.order_by(Patient.name).all()
     return render_template("admin/predict.html", patients=patients)
+
+@app.route("/uploads/<path:filename>")
+@staff_required
+def uploaded_file(filename):
+    """Serve an uploaded cell image (admin/staff only - these are patient medical images)"""
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @app.route("/admin/results")
 @app.route("/admin/results/<int:prediction_id>")

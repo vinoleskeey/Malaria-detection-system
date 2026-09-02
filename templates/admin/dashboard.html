@@ -185,6 +185,7 @@
         .icon-predictions { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
         .icon-high-risk { background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); }
         .icon-low-risk { background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%); }
+        .icon-pending { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); }
         
         /* Dashboard Content */
         .dashboard-content {
@@ -359,10 +360,10 @@
 </div>
 
 <div class="container">
-    {% with messages = get_flashed_messages() %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-success">
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">
                     <i class="fas fa-check-circle"></i> {{ message }}
                 </div>
             {% endfor %}
@@ -394,6 +395,11 @@
             <h4 style="margin: 0;">Staff</h4>
             <p style="margin: 5px 0 0; font-size: 12px; opacity: 0.9;">Manage staff</p>
         </a>
+        <a href="/admin/appointments" style="background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: white; padding: 20px; border-radius: 12px; text-decoration: none; text-align: center; transition: transform 0.3s ease;">
+            <i class="fas fa-calendar-alt" style="font-size: 24px; margin-bottom: 10px;"></i>
+            <h4 style="margin: 0;">Appointments</h4>
+            <p style="margin: 5px 0 0; font-size: 12px; opacity: 0.9;">Review booking requests</p>
+        </a>
         <!-- Patient Portal Link -->
         <a href="/login" target="_blank" style="background: linear-gradient(135deg, #00bfa5 0%, #00897b 100%); color: white; padding: 20px; border-radius: 12px; text-decoration: none; text-align: center; transition: transform 0.3s ease;">
             <i class="fas fa-user-injured" style="font-size: 24px; margin-bottom: 10px;"></i>
@@ -422,8 +428,8 @@
                 {% endfor %}
             </select>
             
-            {% if session.get('viewing_as_patient') or session.get('viewing_as_staff') %}
-            <a href="/admin/switch-back" class="btn btn-back">
+            {% if session.get('viewing_as_patient') %}
+            <a href="/switch-back-admin" class="btn btn-back">
                 <i class="fas fa-arrow-left"></i> Back to Admin
             </a>
             {% endif %}
@@ -434,17 +440,18 @@
     function switchToPatient(patientId) {
         if (patientId) {
             if (confirm('Switch to view this patient\'s account?')) {
-                window.location.href = '/admin/switch-to-patient/' + patientId;
+                window.location.href = '/switch-to-patient/' + patientId;
             }
         }
     }
-    
+
     function switchToStaff(staffId) {
-        if (staffId) {
-            if (confirm('Switch to view this staff member\'s account?')) {
-                window.location.href = '/admin/switch-to-staff/' + staffId;
-            }
-        }
+        // NOTE: there is no backend route for this yet (no /switch-to-staff/<id>
+        // view exists anywhere in the app) - the dropdown above is left in place
+        // but intentionally left non-functional rather than pointed at a route
+        // that doesn't exist. Flagged for a product decision on whether to build
+        // this or remove the "Switch to Staff View" dropdown.
+        alert('Switching to a staff member\'s view is not implemented yet.');
     }
     </script>
 
@@ -469,6 +476,11 @@
             <h3>No Malaria</h3>
             <p class="value">{{ low_risk }}</p>
             <div class="icon icon-low-risk"><i class="fas fa-check-circle"></i></div>
+        </div>
+        <div class="stat-card">
+            <h3>Pending Appointments</h3>
+            <p class="value">{{ pending_appointments_count }}</p>
+            <div class="icon icon-pending"><i class="fas fa-bell"></i></div>
         </div>
     </div>
 
@@ -572,7 +584,7 @@
     
     <div style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 25px; border-radius: 15px; margin-bottom: 30px; border-left: 5px solid #4caf50;">
         <h3 style="color: #2e7d32; margin-bottom: 10px;"><i class="fas fa-user-circle"></i> Viewing as Patient</h3>
-        <p style="color: #558b2f; margin: 0;">You are currently viewing the account as a patient. <a href="/admin/switch-back" style="color: #1a237e; font-weight: 600;">Click here to return to admin view</a></p>
+        <p style="color: #558b2f; margin: 0;">You are currently viewing the account as a patient. <a href="/switch-back-admin" style="color: #1a237e; font-weight: 600;">Click here to return to admin view</a></p>
     </div>
 
     <div class="stats-grid">

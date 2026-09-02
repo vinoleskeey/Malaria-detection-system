@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block header %}My Appointments{% endblock %}
+{% block content %}
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+    <h3 style="color: white; margin: 0;"><i class="fas fa-calendar-check"></i> My Appointments</h3>
+    <a href="/book-appointment" class="btn btn-primary">
+        <i class="fas fa-calendar-plus"></i> Book New
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">
+                <i class="fas fa-info-circle"></i> {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+{% if appointments %}
+<table>
+    <tr>
+        <th><i class="fas fa-calendar-day"></i> Date</th>
+        <th><i class="fas fa-clock"></i> Time</th>
+        <th><i class="fas fa-stethoscope"></i> Reason</th>
+        <th><i class="fas fa-comment-medical"></i> Notes</th>
+        <th><i class="fas fa-info-circle"></i> Status</th>
+        <th><i class="fas fa-paper-plane"></i> Requested</th>
+    </tr>
+    {% for a in appointments %}
+    <tr>
+        <td>{{ a.preferred_date.strftime('%Y-%m-%d') if a.preferred_date else 'N/A' }}</td>
+        <td>{{ a.preferred_time }}</td>
+        <td>{{ a.reason or 'Malaria test' }}</td>
+        <td>{{ a.notes or '-' }}</td>
+        <td>
+            {% if a.status == 'confirmed' %}
+            <span class="badge badge-success"><i class="fas fa-check-circle"></i> Confirmed</span>
+            {% elif a.status == 'cancelled' %}
+            <span class="badge badge-danger"><i class="fas fa-times-circle"></i> Cancelled</span>
+            {% elif a.status == 'completed' %}
+            <span class="badge badge-info"><i class="fas fa-flag-checkered"></i> Completed</span>
+            {% else %}
+            <span class="badge badge-warning"><i class="fas fa-hourglass-half"></i> Pending</span>
+            {% endif %}
+        </td>
+        <td>{{ a.created_at.strftime('%Y-%m-%d %H:%M') if a.created_at else 'N/A' }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<div style="text-align: center; padding: 50px; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+    <i class="fas fa-calendar-times" style="font-size: 60px; color: #b2dfdb; margin-bottom: 20px;"></i>
+    <h3 style="color: #00796b; margin-bottom: 10px;">No Appointments Yet</h3>
+    <p style="color: #666;">You haven't requested any appointments.</p>
+    <a href="/book-appointment" class="btn btn-primary" style="margin-top: 20px;">
+        <i class="fas fa-calendar-plus"></i> Book an Appointment
+    </a>
+</div>
+{% endif %}
+
+{% endblock %}
