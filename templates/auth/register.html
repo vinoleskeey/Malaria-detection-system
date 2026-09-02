@@ -5,6 +5,17 @@
     <div class="login-card">
         <h2><i class="fas fa-user-plus" style="color: #00796b;"></i> Create Account</h2>
 
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">
+                  <i class="fas fa-exclamation-circle"></i>
+                  {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
         <form method="post" id="registerForm">
             <input type="text" name="name" placeholder="Full Name" required style="background: #f8f9fa;">
             <input type="email" name="email" placeholder="Email Address" required style="background: #f8f9fa;">

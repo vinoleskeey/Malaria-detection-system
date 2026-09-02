@@ -12,24 +12,26 @@
   },
   "env": {
     "SECRET_KEY": {
-      "description": "Flask secret key for sessions",
-      "generateValue": true
+      "description": "Flask secret key - SET AS A SECRET in the Railway dashboard with a fixed value (e.g. `python -c \"import secrets; print(secrets.token_hex(32))\"`). Do not use generateValue - it mints a new key on every deploy, which invalidates all logged-in sessions and pending password-reset tokens each time."
     },
     "DEVELOPER_EMAIL": {
-      "description": "Your email address - only this email can access staff features",
+      "description": "Email address that is allowed to access staff/admin features",
       "value": "victorshittu17@gmail.com"
     },
-    "MAIL_USERNAME": {
-      "description": "Your Gmail address for password reset emails",
-      "value": "victorshittu17@gmail.com"
+    "SMTP_HOST": {
+      "description": "SMTP server host (e.g. smtp.gmail.com)"
     },
-    "MAIL_PASSWORD": {
-      "description": "Your Gmail app password for password reset emails",
-      "value": "ifygknbpoxbvizpk"
+    "SMTP_PORT": {
+      "description": "SMTP server port (e.g. 587)"
     },
-    "WEB_URL": {
-      "description": "Your Railway app URL for password reset links",
-      "value": "https://web-production-e60045.up.railway.app"
+    "SMTP_USERNAME": {
+      "description": "SMTP account username / from address for password-reset emails"
+    },
+    "SMTP_PASSWORD": {
+      "description": "SMTP password or app-specific password - SET AS A SECRET, never commit it"
+    },
+    "SMTP_FROM_EMAIL": {
+      "description": "Optional: From address if different from SMTP_USERNAME"
     }
   }
 }

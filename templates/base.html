@@ -28,6 +28,7 @@
         .nav-link:hover i { color: #64ffda; }
         .nav-item.active .nav-link { background: linear-gradient(90deg, rgba(100,255,218,0.2) 0%, rgba(100,255,218,0.05) 100%); border-left-color: #64ffda; }
         .nav-item.active .nav-link i { color: #64ffda; }
+        .nav-badge { margin-left: auto; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(238,90,111,0.55); }
         .main-content { margin-left: 280px; padding: 30px; min-height: 100vh; }
         .top-header { background: linear-gradient(135deg, #00796b 0%, #004d40 100%); padding: 22px 35px; border-radius: 15px; margin-bottom: 30px; box-shadow: 0 4px 25px rgba(0,121,107,0.3); display: flex; justify-content: space-between; align-items: center; }
         .top-header h1 { color: #fff; font-size: 26px; font-weight: 600; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
@@ -103,9 +104,34 @@
             <li class="nav-item {% if request.endpoint == 'medical_records' %}active{% endif %}">
                 <a href="/medical-records" class="nav-link"><i class="fas fa-notes-medical"></i> Medical Records</a>
             </li>
+
+            {% if session.get('role') == 'patient' or session.get('viewing_as_patient') %}
+            <li class="nav-item {% if request.endpoint == 'book_appointment' %}active{% endif %}">
+                <a href="/book-appointment" class="nav-link"><i class="fas fa-calendar-plus"></i> Book Appointment</a>
+            </li>
+            <li class="nav-item {% if request.endpoint == 'my_appointments' %}active{% endif %}">
+                <a href="/my-appointments" class="nav-link"><i class="fas fa-calendar-check"></i> My Appointments</a>
+            </li>
+            {% endif %}
+
+            {% if session.get('role') in ['staff', 'admin'] and not session.get('viewing_as_patient') %}
+            <li class="nav-item {% if request.endpoint in ['admin_appointments', 'admin_update_appointment'] %}active{% endif %}">
+                <a href="/admin/appointments" class="nav-link">
+                    <i class="fas fa-calendar-alt"></i> Appointment Requests
+                    {% if pending_appointments_count and pending_appointments_count > 0 %}
+                    <span class="nav-badge" title="{{ pending_appointments_count }} pending">{{ pending_appointments_count }}</span>
+                    {% endif %}
+                </a>
+            </li>
+            {% endif %}
+
+            <li class="nav-item {% if request.endpoint == 'chatbot' %}active{% endif %}">
+                <a href="/chatbot" class="nav-link"><i class="fas fa-comments-med"></i> AI Health Assistant</a>
+            </li>
             <li class="nav-item {% if request.endpoint == 'profile' %}active{% endif %}">
                 <a href="/profile" class="nav-link"><i class="fas fa-user-cog"></i> My Profile</a>
             </li>
+
             <li class="nav-item">
                 <a href="/logout" class="nav-link"><i class="fas fa-sign-out-alt"></i> Logout</a>
             </li>

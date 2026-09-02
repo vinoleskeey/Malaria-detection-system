@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block header %}Book an Appointment{% endblock %}
+{% block content %}
+
+<div class="form-container" style="max-width: 600px;">
+    <h2 style="color: #00796b; margin-bottom: 10px; text-align: center;">
+        <i class="fas fa-calendar-plus"></i> Book an Appointment
+    </h2>
+    <p style="text-align: center; color: #666; margin-bottom: 30px; font-size: 14px;">
+        Request a slot for a malaria test or consultation. Our staff will confirm the exact time.
+    </p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">
+                    <i class="fas fa-info-circle"></i> {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <form method="post">
+        {% if not has_patient_profile %}
+        <div class="alert alert-info" style="background: #e3f2fd; color: #0d47a1; border-left: 4px solid #1976d2;">
+            <i class="fas fa-id-card"></i> We don't have your patient details yet &mdash; please confirm them below. This is a one-time step.
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-user"></i> Full Name</label>
+            <input type="text" name="patient_name" value="{{ default_name or '' }}" required>
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-birthday-cake"></i> Age <span style="color:#999;">(optional)</span></label>
+            <input type="number" name="patient_age" min="1" step="1" placeholder="e.g. 32">
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-venus-mars"></i> Gender <span style="color:#999;">(optional)</span></label>
+            <select name="patient_gender">
+                <option value="">-- Prefer not to say --</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+            </select>
+        </div>
+        {% endif %}
+
+        <div class="form-group">
+            <label><i class="fas fa-calendar-day"></i> Preferred Date</label>
+            <input type="date" name="preferred_date" required>
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-clock"></i> Preferred Time of Day</label>
+            <select name="preferred_time" required>
+                <option value="">-- Select a time slot --</option>
+                <option value="Morning">Morning</option>
+                <option value="Afternoon">Afternoon</option>
+                <option value="Evening">Evening</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-stethoscope"></i> Reason</label>
+            <input type="text" name="reason" value="Malaria test" placeholder="Malaria test">
+        </div>
+
+        <div class="form-group">
+            <label><i class="fas fa-comment-medical"></i> Additional Notes (optional)</label>
+            <input type="text" name="notes" placeholder="Anything the staff should know">
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+            <i class="fas fa-paper-plane"></i> Submit Request
+        </button>
+    </form>
+
+    <p style="text-align: center; margin-top: 20px;">
+        <a href="/my-appointments" style="color: #00796b; font-weight: 600; text-decoration: none;">
+            <i class="fas fa-list"></i> View my appointments
+        </a>
+    </p>
+</div>
+
+{% endblock %}
