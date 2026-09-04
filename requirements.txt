@@ -28,3 +28,8 @@ python-dotenv==1.0.1
 # libs needed (unlike wkhtmltopdf/weasyprint), so it installs cleanly on
 # Railway's Nixpacks build the same way it does locally.
 reportlab==5.0.1
+
+# Background scheduler for appointment reminder emails (send_appointment_reminders
+# in app_fixed.py) - pure-Python, no external broker (Redis/Celery) needed since
+# this app runs a single gunicorn worker.
+apscheduler==3.11.3

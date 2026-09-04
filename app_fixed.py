@@ -164,6 +164,7 @@ class Appointment(db.Model):
     reason = db.Column(db.String(200), default="Malaria test")
     notes = db.Column(db.Text)
     status = db.Column(db.String(20), default="pending")  # pending/confirmed/cancelled/completed
+    reminder_sent = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     patient = db.relationship('Patient', backref='appointments')
@@ -193,7 +194,27 @@ with app.app_context():
                 print("Added image_path column to predictions table")
     except Exception as e:
         print(f"Migration check: {e}")
-    
+
+    # Add reminder_sent column if it doesn't exist (migration) - PostgreSQL compatible
+    try:
+        from sqlalchemy import text
+        try:
+            result = db.session.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='appointments' AND column_name='reminder_sent'"))
+            if result.fetchone() is None:
+                db.session.execute(text("ALTER TABLE appointments ADD COLUMN reminder_sent BOOLEAN DEFAULT FALSE"))
+                db.session.commit()
+                print("Added reminder_sent column to appointments table")
+        except:
+            # For SQLite (local dev)
+            result = db.session.execute(text("PRAGMA table_info(appointments)"))
+            columns = [row[1] for row in result]
+            if 'reminder_sent' not in columns:
+                db.session.execute(text("ALTER TABLE appointments ADD COLUMN reminder_sent BOOLEAN DEFAULT 0"))
+                db.session.commit()
+                print("Added reminder_sent column to appointments table")
+    except Exception as e:
+        print(f"Migration check: {e}")
+
     # Create default admin account
     admin = User.query.filter_by(email=DEVELOPER_EMAIL).first()
     if not admin:
@@ -373,6 +394,92 @@ def send_prediction_result_email(email, patient_name, prediction, pdf_bytes):
         print(f"[EMAIL ERROR] Failed to send prediction result email: {e}")
         print(f"[EMAIL ERROR] Traceback: {traceback.format_exc()}")
         return False
+
+def send_appointment_reminder_email(email, patient_name, appointment):
+    """Email a patient a reminder ~24h before their booked appointment.
+
+    Same fail-soft SMTP pattern as the other email helpers above - a failed
+    reminder must never crash the background scheduler job.
+    """
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        print("[EMAIL ERROR] SMTP_USERNAME / SMTP_PASSWORD not set in environment")
+        return False
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_FROM_EMAIL
+        msg['To'] = email
+        msg['Subject'] = "Reminder: Your Malaria Test Appointment Is Tomorrow"
+
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #f5f5f5; padding: 30px; border-radius: 10px;">
+                <h2 style="color: #1a237e;">Appointment Reminder</h2>
+                <p>Hello {patient_name},</p>
+                <p>This is a reminder that you have a malaria test appointment scheduled for:</p>
+                <p style="font-size: 18px; font-weight: bold; color: #1a237e;">
+                    {appointment.preferred_date.strftime('%A, %B %d, %Y')} ({appointment.preferred_time})
+                </p>
+                <p><strong>Reason:</strong> {appointment.reason or 'Malaria test'}</p>
+                <p style="color: #666; font-size: 14px;">If you need to reschedule or cancel, please contact the hospital as soon as possible.</p>
+            </div>
+        </body>
+        </html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.sendmail(SMTP_FROM_EMAIL, email, msg.as_string())
+        server.quit()
+
+        return True
+    except Exception as e:
+        import traceback
+        print(f"[EMAIL ERROR] Failed to send appointment reminder email: {e}")
+        print(f"[EMAIL ERROR] Traceback: {traceback.format_exc()}")
+        return False
+
+def send_appointment_reminders():
+    """Background job: email every patient whose confirmed/pending appointment
+    is tomorrow and hasn't been reminded yet. Runs inside its own app context
+    since APScheduler calls this outside of any Flask request.
+    """
+    with app.app_context():
+        tomorrow = (datetime.now() + timedelta(days=1)).date()
+        due = Appointment.query.filter(
+            Appointment.preferred_date == tomorrow,
+            Appointment.status.in_(["pending", "confirmed"]),
+            db.or_(Appointment.reminder_sent.is_(False), Appointment.reminder_sent.is_(None)),
+        ).all()
+
+        for appointment in due:
+            user = db.session.get(User, appointment.user_id)
+            if not user or not user.email:
+                continue
+            sent = send_appointment_reminder_email(user.email, user.name, appointment)
+            if sent:
+                appointment.reminder_sent = True
+                db.session.commit()
+
+def start_appointment_reminder_scheduler():
+    """Start the APScheduler background thread that checks for due reminders.
+
+    Guarded so it starts exactly once per running process: under gunicorn
+    (single worker, no reloader) app.debug is False so it always starts here;
+    under the Werkzeug debug reloader, only the real child process (which
+    sets WERKZEUG_RUN_MAIN) starts it, so the reloader's parent watcher
+    process doesn't spin up a duplicate scheduler.
+    """
+    if app.debug and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return
+    from apscheduler.schedulers.background import BackgroundScheduler
+    scheduler = BackgroundScheduler(daemon=True)
+    scheduler.add_job(send_appointment_reminders, "interval", minutes=30, next_run_time=datetime.now())
+    scheduler.start()
+
+start_appointment_reminder_scheduler()
 
 # ==================== ROUTES ====================
 
