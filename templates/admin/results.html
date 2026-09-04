@@ -36,7 +36,12 @@
     <div class="container">
         {% if prediction %}
         <div class="card" style="margin-bottom: 24px;">
-            <h2><i class="fas fa-microscope"></i> Prediction Result</h2>
+            <h2 style="display: flex; justify-content: space-between; align-items: center;">
+                <span><i class="fas fa-microscope"></i> Prediction Result</span>
+                <a href="/admin/results/{{ prediction.id }}/pdf" class="badge badge-info" style="text-decoration: none; background: #1a237e;">
+                    <i class="fas fa-file-pdf"></i> Download PDF
+                </a>
+            </h2>
             <div class="result-row">
                 <dl>
                     <dt>Patient</dt>
@@ -79,6 +84,7 @@
                     <th>Probability</th>
                     <th>Tested By</th>
                     <th>Date</th>
+                    <th>Report</th>
                 </tr>
                 {% for p in predictions %}
                 <tr>
@@ -93,6 +99,7 @@
                     <td>{{ "%.1f"|format(p.probability) }}%</td>
                     <td>{{ p.staff_name or 'N/A' }}</td>
                     <td>{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else 'N/A' }}</td>
+                    <td><a href="/admin/results/{{ p.id }}/pdf" title="Download PDF"><i class="fas fa-file-pdf" style="color: #c62828;"></i></a></td>
                 </tr>
                 {% endfor %}
             </table>

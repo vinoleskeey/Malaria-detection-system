@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, session, flash, url_for, send_from_directory
+from flask import Flask, render_template, request, redirect, session, flash, url_for, send_from_directory, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -9,7 +9,9 @@ import hashlib
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from models import db
+from pdf_utils import generate_prediction_pdf
 from datetime import datetime, timedelta
 import sys
 import importlib.util
@@ -312,6 +314,63 @@ def send_password_reset_email(email, reset_link):
     except Exception as e:
         import traceback
         print(f"[EMAIL ERROR] Failed to send email: {e}")
+        print(f"[EMAIL ERROR] Traceback: {traceback.format_exc()}")
+        return False
+
+def send_prediction_result_email(email, patient_name, prediction, pdf_bytes):
+    """Email a patient their diagnostic report PDF as soon as a prediction is saved.
+
+    Mirrors send_password_reset_email above (same SMTP_* config, same
+    fail-soft-and-log behavior) but attaches the generated PDF instead of
+    linking out. Never raises - returns False and logs on any failure, since
+    a failed notification email must not break the prediction flow itself.
+    """
+    if not SMTP_USERNAME or not SMTP_PASSWORD:
+        print("[EMAIL ERROR] SMTP_USERNAME / SMTP_PASSWORD not set in environment")
+        return False
+    try:
+        is_malaria = (prediction.result == "Malaria Detected")
+        result_color = "#c62828" if is_malaria else "#2e7d32"
+
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_FROM_EMAIL
+        msg['To'] = email
+        msg['Subject'] = f"Your Malaria Test Result - {prediction.result}"
+
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: #f5f5f5; padding: 30px; border-radius: 10px;">
+                <h2 style="color: #1a237e;">Your Test Result Is Ready</h2>
+                <p>Hello {patient_name},</p>
+                <p>Your malaria blood smear test has been analyzed. Result:</p>
+                <p style="font-size: 20px; font-weight: bold; color: {result_color};">{prediction.result}</p>
+                <p>Confidence: {prediction.probability:.1f}%</p>
+                <p>The full diagnostic report is attached to this email as a PDF.</p>
+                <p style="color: #666; font-size: 14px;">This is an AI-assisted screening result. Please consult a licensed medical professional to confirm this result and discuss next steps.</p>
+            </div>
+        </body>
+        </html>
+        """
+        msg.attach(MIMEText(body, 'html'))
+
+        attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+        attachment.add_header(
+            'Content-Disposition', 'attachment',
+            filename=f"malaria-report-{prediction.id}.pdf"
+        )
+        msg.attach(attachment)
+
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.sendmail(SMTP_FROM_EMAIL, email, msg.as_string())
+        server.quit()
+
+        return True
+    except Exception as e:
+        import traceback
+        print(f"[EMAIL ERROR] Failed to send prediction result email: {e}")
         print(f"[EMAIL ERROR] Traceback: {traceback.format_exc()}")
         return False
 
@@ -1005,6 +1064,15 @@ def admin_predict():
             prediction_row = Prediction.query.order_by(Prediction.id.desc()).first()
             patient = db.session.get(Patient, patient_id)
 
+            # Email the patient their PDF report. Best-effort: a failed/slow
+            # email must never block staff from seeing the result they just ran.
+            if patient and patient.user and patient.user.email:
+                try:
+                    pdf_bytes = generate_prediction_pdf(prediction_row, patient)
+                    send_prediction_result_email(patient.user.email, patient.name, prediction_row, pdf_bytes)
+                except Exception as e:
+                    print(f"[EMAIL ERROR] Could not generate/send prediction report: {e}")
+
             return render_template("admin/results.html", prediction=prediction_row, patient=patient)
 
         except Exception as e:
@@ -1033,6 +1101,44 @@ def admin_results(prediction_id=None):
     
     predictions = Prediction.query.join(Patient).order_by(Prediction.created_at.desc()).all()
     return render_template("admin/results.html", predictions=predictions)
+
+@app.route("/admin/results/<int:prediction_id>/pdf")
+@staff_required
+def admin_result_pdf(prediction_id):
+    """Download a prediction's diagnostic report as a PDF (admin/staff only)"""
+    prediction = db.session.get(Prediction, prediction_id)
+    if not prediction:
+        flash("Prediction not found", "error")
+        return redirect("/admin/results")
+    patient = db.session.get(Patient, prediction.patient_id)
+    pdf_bytes = generate_prediction_pdf(prediction, patient)
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=malaria-report-{prediction.id}.pdf"},
+    )
+
+@app.route("/my-results/<int:prediction_id>/pdf")
+@login_required
+def my_result_pdf(prediction_id):
+    """Let a patient download the PDF report for one of their own predictions"""
+    prediction = db.session.get(Prediction, prediction_id)
+    if not prediction:
+        flash("Prediction not found", "error")
+        return redirect("/my-results")
+
+    patient = db.session.get(Patient, prediction.patient_id)
+    owner_user_id = patient.user_id if patient else None
+    if session.get("role") not in ["staff", "admin"] and owner_user_id != session.get("user"):
+        flash("Access denied", "error")
+        return redirect("/my-results")
+
+    pdf_bytes = generate_prediction_pdf(prediction, patient)
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=malaria-report-{prediction.id}.pdf"},
+    )
 
 # ------------------- RUN APP -------------------
 

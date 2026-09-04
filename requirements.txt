@@ -23,3 +23,8 @@ psycopg2-binary==2.9.9
 requests==2.32.3
 
 python-dotenv==1.0.1
+
+# PDF diagnostic report generation (pdf_utils.py) - pure-Python, no system
+# libs needed (unlike wkhtmltopdf/weasyprint), so it installs cleanly on
+# Railway's Nixpacks build the same way it does locally.
+reportlab==5.0.1
