@@ -106,6 +106,9 @@
             </li>
 
             {% if session.get('role') == 'patient' or session.get('viewing_as_patient') %}
+            <li class="nav-item {% if request.endpoint == 'symptom_checker' %}active{% endif %}">
+                <a href="/symptom-checker" class="nav-link"><i class="fas fa-clipboard-check"></i> Symptom Checker</a>
+            </li>
             <li class="nav-item {% if request.endpoint == 'book_appointment' %}active{% endif %}">
                 <a href="/book-appointment" class="nav-link"><i class="fas fa-calendar-plus"></i> Book Appointment</a>
             </li>

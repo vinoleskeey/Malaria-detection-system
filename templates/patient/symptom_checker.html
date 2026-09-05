@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block header %}Symptom Risk Checker{% endblock %}
+{% block content %}
+
+<div class="form-container" style="max-width: 700px;">
+    <h2 style="color: #00796b; margin-bottom: 10px; text-align: center;">
+        <i class="fas fa-clipboard-check"></i> Symptom Risk Checker
+    </h2>
+    <p style="text-align: center; color: #666; margin-bottom: 30px; font-size: 14px;">
+        Answer a few quick questions for guidance on what to do next. This is not a diagnosis -
+        it never replaces an actual test or a doctor's judgment.
+    </p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">
+                    <i class="fas fa-info-circle"></i> {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% if result %}
+    {% set colors = {
+        'Emergency': ('#c62828', '#fdecea'),
+        'High': ('#e65100', '#fff3e0'),
+        'Moderate': ('#f9a825', '#fffde7'),
+        'Low': ('#2e7d32', '#e8f5e9'),
+    } %}
+    {% set fg, bg = colors.get(result.risk_level, ('#1a237e', '#e8eaf6')) %}
+    <div style="background: {{ bg }}; border-left: 6px solid {{ fg }}; border-radius: 12px; padding: 24px; margin-bottom: 30px;">
+        <h3 style="color: {{ fg }}; margin-bottom: 8px;">
+            <i class="fas fa-exclamation-circle"></i> Risk Level: {{ result.risk_level }}
+        </h3>
+        <p style="color: #333; margin-bottom: 12px;">{{ result.advice }}</p>
+        <ul style="margin: 0 0 12px 20px; color: #555; font-size: 13px;">
+            {% for reason in result.reasons %}
+            <li>{{ reason }}</li>
+            {% endfor %}
+        </ul>
+        {% if result.risk_level in ['Emergency', 'High', 'Moderate'] %}
+        <a href="/book-appointment" class="btn btn-primary">
+            <i class="fas fa-calendar-plus"></i> Book an Appointment Now
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <form method="post">
+        <h4 style="color: #c62828; margin-bottom: 10px;"><i class="fas fa-triangle-exclamation"></i> Danger Signs</h4>
+        <p style="color: #888; font-size: 13px; margin-bottom: 10px;">Any of these means you should seek emergency care right away.</p>
+        {% for key, label in danger_signs %}
+        <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-weight: normal;">
+            <input type="checkbox" name="{{ key }}" style="width: auto;"> {{ label }}
+        </label>
+        {% endfor %}
+
+        <h4 style="color: #00796b; margin: 24px 0 10px;"><i class="fas fa-thermometer-half"></i> Common Symptoms</h4>
+        {% for key, label in core_symptoms %}
+        <label style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-weight: normal;">
+            <input type="checkbox" name="{{ key }}" style="width: auto;"> {{ label }}
+        </label>
+        {% endfor %}
+
+        <div class="form-group" style="margin-top: 20px;">
+            <label><i class="fas fa-calendar-day"></i> How many days have you had these symptoms?</label>
+            <input type="number" name="duration_days" min="0" step="1" placeholder="e.g. 2">
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%;">
+            <i class="fas fa-search"></i> Check My Risk
+        </button>
+    </form>
+
+    {% if history %}
+    <h4 style="color: #1a237e; margin: 30px 0 10px;"><i class="fas fa-history"></i> Your Past Checks</h4>
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>Risk Level</th>
+            <th>Duration</th>
+        </tr>
+        {% for h in history %}
+        <tr>
+            <td>{{ h.created_at.strftime('%Y-%m-%d %H:%M') if h.created_at else 'N/A' }}</td>
+            <td>{{ h.risk_level }}</td>
+            <td>{{ h.duration_days if h.duration_days is not none else 'N/A' }} day(s)</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+</div>
+
+{% endblock %}
