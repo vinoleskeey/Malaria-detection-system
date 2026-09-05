@@ -170,6 +170,21 @@ class Appointment(db.Model):
     patient = db.relationship('Patient', backref='appointments')
     booked_by = db.relationship('User', backref='booked_appointments')
 
+class SymptomCheck(db.Model):
+    __tablename__ = 'symptom_checks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patients.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    symptoms = db.Column(db.String(300))  # comma-separated symptom keys selected
+    danger_signs = db.Column(db.String(300))  # comma-separated danger-sign keys selected
+    duration_days = db.Column(db.Integer)
+    risk_level = db.Column(db.String(20))  # Emergency/High/Moderate/Low
+    advice = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    patient = db.relationship('Patient', backref='symptom_checks')
+
 # Create all tables and default admin account
 with app.app_context():
     db.create_all()
@@ -882,6 +897,152 @@ def my_appointments():
     )
 
     return render_template("patient/my_appointments.html", appointments=appointments)
+
+# ------------------- SYMPTOM RISK CHECKER (Patient) -------------------
+
+# (label, key) pairs shown as checkboxes - kept in one place so the route and
+# template agree on what "danger sign" / "core symptom" actually means.
+DANGER_SIGNS = [
+    ("convulsions", "Convulsions or seizures"),
+    ("difficulty_breathing", "Difficulty breathing"),
+    ("confusion", "Confusion or difficulty waking up"),
+    ("severe_vomiting", "Unable to keep any fluids down"),
+    ("dark_urine", "Dark/cola-colored urine"),
+    ("unable_to_drink", "Unable to drink or breastfeed (in a child)"),
+]
+CORE_SYMPTOMS = [
+    ("fever", "Fever"),
+    ("chills", "Chills or shivering"),
+    ("headache", "Severe headache"),
+    ("muscle_pain", "Muscle or joint pain"),
+    ("nausea", "Nausea or vomiting"),
+    ("fatigue", "Unusual tiredness or weakness"),
+    ("sweating", "Heavy sweating"),
+]
+
+def _assess_symptom_risk(danger_keys, symptom_keys, duration_days):
+    """Rule-based (not ML) triage: transparent and conservative on purpose -
+    any danger sign always wins, regardless of everything else.
+
+    Returns (risk_level, advice, reasons) - reasons is shown to the patient so
+    the result isn't a black box.
+    """
+    reasons = []
+
+    if danger_keys:
+        reasons.append("You reported at least one danger sign.")
+        return (
+            "Emergency",
+            "Seek emergency medical care immediately - go to the nearest hospital or "
+            "emergency room now. Do not wait for a test appointment.",
+            reasons,
+        )
+
+    has_fever = "fever" in symptom_keys
+    symptom_count = len(symptom_keys)
+
+    if has_fever and duration_days and duration_days >= 2:
+        reasons.append(f"Fever reported for {duration_days}+ days.")
+        return (
+            "High",
+            "Your symptoms suggest a real possibility of malaria. Please book an "
+            "urgent appointment for testing as soon as possible - do not wait it out.",
+            reasons,
+        )
+
+    if has_fever and symptom_count >= 3:
+        reasons.append("Fever plus multiple other symptoms.")
+        return (
+            "High",
+            "Your symptoms suggest a real possibility of malaria. Please book an "
+            "urgent appointment for testing as soon as possible.",
+            reasons,
+        )
+
+    if has_fever or symptom_count >= 2:
+        reasons.append("Fever or multiple symptoms reported, but not yet prolonged/severe.")
+        return (
+            "Moderate",
+            "Your symptoms could indicate malaria or another infection. Please book "
+            "a test appointment in the next day or two, and monitor for any danger signs.",
+            reasons,
+        )
+
+    reasons.append("No fever and few symptoms reported.")
+    return (
+        "Low",
+        "Your symptoms don't strongly suggest malaria right now, but keep monitoring "
+        "how you feel. If fever develops or symptoms worsen, use this checker again "
+        "or book a test.",
+        reasons,
+    )
+
+@app.route("/symptom-checker", methods=["GET", "POST"])
+@login_required
+def symptom_checker():
+    user_id = session.get("user")
+    role = session.get("role")
+
+    if role != "patient" and not session.get("viewing_as_patient"):
+        flash("The symptom checker is available for patient accounts", "error")
+        return redirect("/dashboard")
+
+    patient = Patient.query.filter_by(user_id=user_id).first()
+    result = None
+
+    # Unlike booking, the risk check doesn't need age/gender to score anything -
+    # auto-provision a bare-minimum Patient row so a self-registered user (who
+    # has never booked an appointment) can still use the checker immediately.
+    if not patient and request.method == "POST":
+        name = (session.get("user_name") or "").strip() or "Patient"
+        patient = Patient(user_id=user_id, name=name)
+        db.session.add(patient)
+        db.session.commit()
+
+    if request.method == "POST":
+        selected_danger = [key for key, _ in DANGER_SIGNS if request.form.get(key)]
+        selected_symptoms = [key for key, _ in CORE_SYMPTOMS if request.form.get(key)]
+        duration_raw = (request.form.get("duration_days") or "").strip()
+
+        duration_days = None
+        if duration_raw:
+            try:
+                duration_days = max(0, int(duration_raw))
+            except ValueError:
+                duration_days = None
+
+        if not selected_danger and not selected_symptoms:
+            flash("Please select at least one symptom (or danger sign) to check.", "error")
+        else:
+            risk_level, advice, reasons = _assess_symptom_risk(selected_danger, selected_symptoms, duration_days)
+
+            check = SymptomCheck(
+                patient_id=patient.id,
+                user_id=user_id,
+                symptoms=",".join(selected_symptoms),
+                danger_signs=",".join(selected_danger),
+                duration_days=duration_days,
+                risk_level=risk_level,
+                advice=advice,
+            )
+            db.session.add(check)
+            db.session.commit()
+
+            result = {"risk_level": risk_level, "advice": advice, "reasons": reasons}
+
+    history = (
+        SymptomCheck.query.filter_by(patient_id=patient.id).order_by(SymptomCheck.created_at.desc()).limit(10).all()
+        if patient
+        else []
+    )
+
+    return render_template(
+        "patient/symptom_checker.html",
+        danger_signs=DANGER_SIGNS,
+        core_symptoms=CORE_SYMPTOMS,
+        result=result,
+        history=history,
+    )
 
 # ------------------- APPOINTMENTS (Staff/Admin) -------------------
 
